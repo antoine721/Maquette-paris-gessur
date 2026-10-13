@@ -1,8 +1,9 @@
 // Fabrique de boosters.
 // Chaque carte tire d'abord sa rareté (proportions du catalogue WikiMasters, carte 5 au moins Rare),
-// puis un article de cette rareté dans une réserve d'articles déjà mesurés :
-// - les articles tirés au hasard alimentent surtout les raretés courantes ;
-// - les articles les plus lus des derniers mois alimentent les Super rares, Ultra rares et Légendaires.
+// puis un article de cette rareté :
+// - dans l'index de tout Wikipédia dès qu'un passage complet est fait (voir indexer.js) ;
+// - sinon dans une réserve d'articles mesurés à la volée : tirés au hasard pour les raretés
+//   courantes, parmi les plus lus des derniers mois pour les Super rares, Ultra rares et Légendaires.
 import {
   FEATURED_ODDS,
   MAX_RARITY,
@@ -22,7 +23,7 @@ const DETAILS_CHUNK = 20;
 
 const unavailable = (msg) => Object.assign(new Error(msg), { status: 503 });
 
-export function createPackFactory({ wiki, store, rand = Math.random, log = console, poolMonths = 12 }) {
+export function createPackFactory({ wiki, store, index = null, rand = Math.random, log = console, poolMonths = 12 }) {
   let pool = [];
   let poolLoading = null;
   let poolTriedAt = 0;
@@ -127,6 +128,19 @@ export function createPackFactory({ wiki, store, rand = Math.random, log = conso
   }
 
   const stock = () => buffers.reduce((n, b) => n + b.length, 0);
+  const fromIndex = () => Boolean(index?.ready() && store.drawArticle);
+
+  // Tirage dans l'index : la rareté voulue (ou en dessous, sans passer sous `floor`).
+  function takeIndexed(tier, types, used, floor = 0) {
+    for (let t = tier; t >= floor; t--) {
+      const a = store.drawArticle(t, types, used, rand);
+      if (a) {
+        used.add(a.pageId);
+        return a;
+      }
+    }
+    return null;
+  }
 
   async function pickPack(theme) {
     const { types } = packByKey(theme);
@@ -137,6 +151,17 @@ export function createPackFactory({ wiki, store, rand = Math.random, log = conso
     ];
     const used = new Set();
     const picks = [];
+    if (fromIndex()) {
+      for (const { tier, floor } of slots) {
+        const p =
+          takeIndexed(tier, types, used, floor) ??
+          takeIndexed(tier, null, used, floor) ??
+          takeIndexed(tier, types, used) ??
+          takeIndexed(tier, null, used);
+        if (p) picks.push(p);
+      }
+      return picks;
+    }
     for (const { tier, floor } of slots) {
       let p = take(tier, types, used, floor);
       for (let attempt = 0; !p && types && attempt < 2; attempt++) {
@@ -171,16 +196,19 @@ export function createPackFactory({ wiki, store, rand = Math.random, log = conso
 
   // Ouvre `count` boosters d'un coup : renvoie, par booster, les cartes et leur éventuel Shiny.
   async function generatePacks(theme = 'encyclopedie', count = 1) {
-    for (let attempt = 0; stock() < PACK_SIZE * 2 && attempt < 3; attempt++) await refill({ extraRandom: 1 });
-    if (stock() < PACK_SIZE) throw unavailable('Wikipédia ne répond pas, réessaie dans un instant.');
+    const indexed = fromIndex();
+    if (!indexed) {
+      for (let attempt = 0; stock() < PACK_SIZE * 2 && attempt < 3; attempt++) await refill({ extraRandom: 1 });
+      if (stock() < PACK_SIZE) throw unavailable('Wikipédia ne répond pas, réessaie dans un instant.');
+    }
 
     const picked = [];
     for (let i = 0; i < count; i++) {
-      if (stock() < PACK_SIZE * 2) await refill({ extraRandom: 1 });
+      if (!indexed && stock() < PACK_SIZE * 2) await refill({ extraRandom: 1 });
       picked.push(await pickPack(theme));
     }
     const cards = await materialize(picked.flat());
-    refill().catch(() => {});
+    if (!indexed) refill().catch(() => {});
     const packs = picked
       .map((pages) => pages.map((p) => ({ card: cards.get(p.pageId), shiny: rand() < SHINY_RATE })).filter((x) => x.card))
       .filter((p) => p.length >= 3);
@@ -189,6 +217,7 @@ export function createPackFactory({ wiki, store, rand = Math.random, log = conso
   }
 
   async function warmUp() {
+    if (fromIndex()) return;
     await loadPool().catch((e) => log.warn?.(`[packs] ${e.message}`));
     await refill({ extraRandom: 1 });
   }
@@ -198,6 +227,6 @@ export function createPackFactory({ wiki, store, rand = Math.random, log = conso
     warmUp,
     loadPool,
     refill,
-    stats: () => ({ pool: pool.length, buffers: buffers.map((b) => b.length) }),
+    stats: () => ({ source: fromIndex() ? 'index' : 'réserve', pool: pool.length, buffers: buffers.map((b) => b.length) }),
   };
 }

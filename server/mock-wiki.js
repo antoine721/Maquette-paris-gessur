@@ -141,6 +141,7 @@ export function createMockFetch({ latencyMs = 120, seed = Date.now() } = {}) {
   const byTitle = new Map(pages.map((p) => [p.title, p]));
   const byId = new Map(pages.map((p) => [p.pageid, p]));
   const obscure = pages.filter((p) => !p.famous);
+  const alphabetical = [...pages].sort((a, b) => (a.title < b.title ? -1 : a.title > b.title ? 1 : 0));
   const rng = seeded(seed);
 
   const json = (body, status = 200) => ({ ok: status < 400, status, json: async () => body });
@@ -185,6 +186,30 @@ export function createMockFetch({ latencyMs = 120, seed = Date.now() } = {}) {
       return json({ items: [{ project: 'fr.wikipedia', access: 'all-access', year: m[1], month: m[2], day: 'all-days', articles }] });
     }
     const params = url.searchParams;
+    if (params.get('meta') === 'siteinfo') return json({ batchcomplete: true, query: { statistics: { articles: pages.length } } });
+    // Parcours alphabétique : comme la vraie API, les vues arrivent en deux réponses au-delà de 25 pages.
+    if (params.get('generator') === 'allpages') {
+      const from = params.get('gapcontinue') ?? '';
+      const n = Math.min(Number(params.get('gaplimit') || 10), 500);
+      const start = alphabetical.findIndex((p) => p.title >= from);
+      const slice = start < 0 ? [] : alphabetical.slice(start, start + n);
+      const after = start < 0 ? null : alphabetical[start + n];
+      const split = slice.length > 25;
+      const nextBatch = after ? { gapcontinue: after.title, continue: 'gapcontinue||' } : null;
+      if (split && !params.has('pvipcontinue')) {
+        const out = slice.map((p, i) => {
+          const full = page(p, params);
+          if (i >= 25) delete full.pageviews;
+          return full;
+        });
+        return json({ continue: { pvipcontinue: '25', gapcontinue: from, continue: 'gapcontinue||' }, query: { pages: out } });
+      }
+      if (split) {
+        const out = slice.map((p, i) => (i >= 25 ? { pageid: p.pageid, ns: 0, title: p.title, pageviews: daily(p.views, 30, rng) } : { pageid: p.pageid, ns: 0, title: p.title }));
+        return json({ batchcomplete: true, ...(nextBatch ? { continue: nextBatch } : {}), query: { pages: out } });
+      }
+      return json({ batchcomplete: true, ...(nextBatch ? { continue: nextBatch } : {}), query: { pages: slice.map((p) => page(p, params)) } });
+    }
     let selected = [];
     if (params.get('generator') === 'random') {
       const n = Math.min(Number(params.get('grnlimit') || 1), 500);

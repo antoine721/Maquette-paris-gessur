@@ -1,7 +1,8 @@
-// Cartothèque : toutes les cartes découvertes par le groupe, filtrées côté serveur.
+// Cartothèque : les cartes découvertes par le groupe, ou toutes les cartes possibles de Wikipédia.
 import { useEffect, useState } from 'react';
 import { CardGrid, CardTable, FilterBar, useCardFilters } from '../components/CardBrowser.jsx';
-import { Chip, InfoTip, Page, PageHeader, Spinner } from '../components/ui.jsx';
+import { WikiBrowser } from '../components/WikiIndex.jsx';
+import { Chip, InfoTip, Page, PageHeader, Segmented, Spinner } from '../components/ui.jsx';
 import { api } from '../lib/api.js';
 import { fmt } from '../lib/format.js';
 import { useToast } from '../lib/toast.jsx';
@@ -17,6 +18,31 @@ const SORTS = [
 ];
 
 export default function Catalogue() {
+  const [source, setSource] = useState('groupe');
+  const switcher = (
+    <Segmented
+      value={source}
+      onChange={setSource}
+      options={[
+        { value: 'groupe', label: 'Découvertes du groupe' },
+        { value: 'wikipedia', label: 'Tout Wikipédia' },
+      ]}
+    />
+  );
+  if (source === 'wikipedia') {
+    return (
+      <Page>
+        <PageHeader eyebrow="Cartothèque" title="Tout Wikipédia" sub="Chaque article illustré est une carte possible. Les plus lus d’abord.">
+          {switcher}
+        </PageHeader>
+        <WikiBrowser />
+      </Page>
+    );
+  }
+  return <GroupCatalogue switcher={switcher} />;
+}
+
+function GroupCatalogue({ switcher }) {
   const toast = useToast();
   const [f, set] = useCardFilters({ sort: 'rarity' });
   const [mine, setMine] = useState(null);
@@ -74,6 +100,7 @@ export default function Catalogue() {
         }
         sub={res ? `${fmt(res.total)} cartes découvertes par le groupe` : 'Chargement…'}
       >
+        {switcher}
         <div className="flex gap-1.5">
           <Chip active={mine === true} onClick={() => setMine(mine === true ? null : true)}>
             Je l’ai

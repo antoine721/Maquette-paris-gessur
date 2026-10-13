@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { createApp } from './app.js';
 import { openDb } from './db.js';
 import { createMockFetch } from './mock-wiki.js';
+import { createIndexer } from './indexer.js';
 import { createPackFactory } from './packs.js';
 import { createWiki } from './wiki.js';
 
@@ -23,13 +24,16 @@ const db = openDb(join(DATA_DIR, 'wikipacks.db'));
 
 const mockFetch = MOCK ? createMockFetch() : null;
 const wiki = createWiki({ lang: WIKI_LANG, userAgent: USER_AGENT, fetchImpl: mockFetch ?? globalThis.fetch });
-const packs = createPackFactory({ wiki, store: db });
+// Indexation de tout Wikipédia en tâche de fond (WIKI_INDEX=0 pour la couper).
+const indexer = env.WIKI_INDEX === '0' ? null : createIndexer({ wiki, db, pauseMs: Number(env.WIKI_INDEX_PAUSE_MS) || 300 });
+const packs = createPackFactory({ wiki, store: db, index: indexer });
 
 const server = createApp({
   db,
   packs,
   publicDir: resolve(env.PUBLIC_DIR || join(root, 'dist')),
   mockImage: mockFetch?.image ?? null,
+  indexer,
   inviteCode: (env.INVITE_CODE || '').trim(),
   wikiLang: WIKI_LANG,
 });
@@ -39,11 +43,15 @@ server.listen(PORT, () => {
   console.log(`Données : ${DATA_DIR}`);
 });
 
-packs.warmUp().then(() => console.log('[packs] réserve prête', packs.stats()));
+packs.warmUp().then(() => {
+  console.log('[packs] prêt', packs.stats());
+  indexer?.start();
+});
 setInterval(() => packs.loadPool().catch(() => {}), 24 * 3600 * 1000).unref();
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {
+    indexer?.stop();
     server.close();
     server.closeAllConnections?.();
     db.close();

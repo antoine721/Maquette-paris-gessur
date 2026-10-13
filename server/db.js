@@ -1,7 +1,7 @@
 // Stockage SQLite (module node:sqlite intégré à Node 22, aucune dépendance).
 // Le schéma évolue par migrations numérotées (PRAGMA user_version).
 import { DatabaseSync } from 'node:sqlite';
-import { RARITIES, scoreOf, shinyStats } from './cards.js';
+import { RARITIES, scoreOf, shinyStats, statsFor } from './cards.js';
 
 const MIGRATIONS = [
   // 1 : schéma initial.
@@ -83,6 +83,34 @@ const MIGRATIONS = [
     copy_id INTEGER REFERENCES copies(id) ON DELETE SET NULL,
     shiny INTEGER NOT NULL DEFAULT 0 CHECK (shiny IN (0, 1)),
     created_at INTEGER NOT NULL
+  );
+  `,
+  // 2 : index de tout Wikipédia (un article par ligne, sans le texte) et état de l'indexation.
+  `
+  CREATE TABLE articles (
+    page_id INTEGER PRIMARY KEY,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    image TEXT,
+    image_width INTEGER,
+    image_height INTEGER,
+    wikidata TEXT CHECK (wikidata IS NULL OR wikidata GLOB 'Q[0-9]*'),
+    type TEXT NOT NULL,
+    length INTEGER NOT NULL DEFAULT 0,
+    langs INTEGER,
+    quality TEXT CHECK (quality IN ('AdQ', 'BA')),
+    views30 INTEGER NOT NULL DEFAULT 0 CHECK (views30 >= 0),
+    rarity INTEGER NOT NULL CHECK (rarity BETWEEN 0 AND 5),
+    indexed_at INTEGER NOT NULL
+  );
+  -- Tirage : seuls les articles illustrés deviennent des cartes.
+  CREATE INDEX articles_draw ON articles (rarity, type, page_id) WHERE image IS NOT NULL;
+  CREATE INDEX articles_popular ON articles (rarity, views30 DESC) WHERE image IS NOT NULL;
+  CREATE INDEX articles_title ON articles (title COLLATE NOCASE);
+
+  CREATE TABLE meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL CHECK (json_valid(value))
   );
   `,
 ];
@@ -241,6 +269,54 @@ export function openDb(file) {
       WHERE e.id > ? ORDER BY e.id ASC LIMIT 100`),
   };
 
+  // ---------- Index de tout Wikipédia ----------
+  const upsertArticle = db.prepare(`INSERT INTO articles
+      (page_id, title, description, image, image_width, image_height, wikidata, type, length, langs, quality, views30, rarity, indexed_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT (page_id) DO UPDATE SET title = excluded.title, description = excluded.description, image = excluded.image,
+      image_width = excluded.image_width, image_height = excluded.image_height, wikidata = excluded.wikidata, type = excluded.type,
+      length = excluded.length, langs = excluded.langs, quality = excluded.quality, views30 = excluded.views30,
+      rarity = excluded.rarity, indexed_at = excluded.indexed_at`);
+  const metaGet = db.prepare('SELECT value FROM meta WHERE key = ?');
+  const metaSet = db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value');
+  const articleRange = db.prepare('SELECT MIN(page_id) AS lo, MAX(page_id) AS hi FROM articles WHERE image IS NOT NULL AND rarity = ?');
+  const articleById = db.prepare('SELECT * FROM articles WHERE page_id = ?');
+  const articleCounts = db.prepare(`SELECT COUNT(*) AS total, COUNT(image) AS illustrated FROM articles`);
+  const articleByRarity = db.prepare('SELECT rarity, COUNT(*) AS n FROM articles WHERE image IS NOT NULL GROUP BY rarity');
+  const drawStatements = new Map();
+
+  // Une requête préparée par combinaison (nombre de familles, sens de recherche).
+  function drawStatement(nTypes, after) {
+    const key = `${nTypes}:${after}`;
+    if (!drawStatements.has(key)) {
+      const typeFilter = nTypes ? `AND type IN (${Array(nTypes).fill('?').join(', ')})` : '';
+      drawStatements.set(
+        key,
+        db.prepare(`SELECT * FROM articles WHERE image IS NOT NULL AND rarity = ? ${typeFilter}
+          AND page_id ${after ? '>=' : '<'} ? ORDER BY page_id ${after ? 'ASC' : 'DESC'} LIMIT 1`),
+      );
+    }
+    return drawStatements.get(key);
+  }
+
+  function articleRow(r) {
+    return {
+      pageId: r.page_id,
+      title: r.title,
+      description: r.description,
+      image: r.image,
+      imageWidth: r.image_width,
+      imageHeight: r.image_height,
+      wikidata: r.wikidata,
+      type: r.type,
+      length: r.length,
+      langs: r.langs,
+      quality: r.quality,
+      views30: r.views30,
+      rarity: r.rarity,
+    };
+  }
+
   function tx(fn) {
     db.exec('BEGIN IMMEDIATE');
     try {
@@ -357,7 +433,13 @@ export function openDb(file) {
 
     card(pageId, viewerId) {
       const row = q.card.get(pageId);
-      if (!row) return null;
+      if (!row) {
+        // Pas encore tirée : aperçu depuis l'index de Wikipédia (stats provisoires, rareté actuelle).
+        const a = articleById.get(pageId);
+        if (!a || !a.image) return null;
+        const preview = { ...articleRow(a), ...statsFor(articleRow(a)) };
+        return { ...preview, preview: true, extract: '', daily: [], totalCopies: 0, owners: [], myCopies: [], shinyStats: shinyStats(preview, preview.rarity) };
+      }
       const card = toCard(row, { full: true });
       card.totalCopies = q.totalCopies.get(pageId).n;
       card.owners = q.owners.all(pageId).map((o) => ({ username: o.username, count: Number(o.count), shinies: Number(o.shinies) }));
@@ -463,6 +545,84 @@ export function openDb(file) {
       return {
         cards: q.searchCards.all(like, prefix).map((r) => toCard(r)),
         players: q.searchUsers.all(like).map((r) => r.username),
+      };
+    },
+
+    upsertArticles(rows) {
+      if (!rows.length) return;
+      tx(() => {
+        const now = Date.now();
+        for (const a of rows) {
+          upsertArticle.run(
+            a.pageId, a.title, a.description, a.image, a.imageWidth, a.imageHeight,
+            typeof a.wikidata === 'string' && /^Q\d+$/.test(a.wikidata) ? a.wikidata : null,
+            a.type, a.length, a.langs, a.quality === 'AdQ' || a.quality === 'BA' ? a.quality : null, a.views30, a.rarity, now,
+          );
+        }
+      });
+    },
+    meta(key) {
+      const row = metaGet.get(key);
+      return row ? JSON.parse(row.value) : null;
+    },
+    setMeta: (key, value) => metaSet.run(key, JSON.stringify(value)),
+    articleStats() {
+      const { total, illustrated } = articleCounts.get();
+      const byRarity = RARITIES.map(() => 0);
+      for (const r of articleByRarity.all()) byRarity[r.rarity] = r.n;
+      return { total, illustrated, byRarity };
+    },
+    article: (pageId) => {
+      const r = articleById.get(pageId);
+      return r ? articleRow(r) : null;
+    },
+    // Un article illustré au hasard, d'une rareté donnée (et d'une des familles si précisées).
+    drawArticle(rarity, types, exclude = new Set(), rand = Math.random) {
+      const range = articleRange.get(rarity);
+      if (range.lo == null) return null;
+      const params = types?.length ? types : [];
+      for (let attempt = 0; attempt < 6; attempt++) {
+        const pivot = Math.floor(range.lo + rand() * (range.hi - range.lo + 1));
+        const row =
+          drawStatement(params.length, true).get(rarity, ...params, pivot) ?? drawStatement(params.length, false).get(rarity, ...params, pivot);
+        if (!row) return null;
+        if (!exclude.has(row.page_id)) return articleRow(row);
+      }
+      return null;
+    },
+    // Parcourir tout Wikipédia (cartes possibles), par popularité ou par titre.
+    browseArticles({ q = '', rarity = null, type = null, sort = 'views', limit = 60, offset = 0, viewerId = 0 }) {
+      const where = ['a.image IS NOT NULL'];
+      const params = [];
+      if (q) {
+        where.push('a.title >= ? COLLATE NOCASE AND a.title < ? COLLATE NOCASE');
+        params.push(q, `${q}\uffff`);
+      }
+      if (rarity != null) {
+        where.push('a.rarity = ?');
+        params.push(rarity);
+      }
+      if (type) {
+        where.push('a.type = ?');
+        params.push(type);
+      }
+      const order = sort === 'alpha' ? 'a.title COLLATE NOCASE ASC, a.page_id' : 'a.views30 DESC, a.page_id';
+      const lim = Math.min(Math.max(Math.trunc(Number(limit)) || 60, 1), 120);
+      const off = Math.max(Math.trunc(Number(offset)) || 0, 0);
+      const rows = db
+        .prepare(`SELECT a.*, c.atk, c.def, c.created_at AS discovered,
+            (SELECT COUNT(*) FROM copies x WHERE x.card_id = a.page_id AND x.owner_id = ?) AS mine
+          FROM articles a LEFT JOIN cards c ON c.page_id = a.page_id
+          WHERE ${where.join(' AND ')} ORDER BY ${order} LIMIT ? OFFSET ?`)
+        .all(viewerId, ...params, lim + 1, off);
+      return {
+        hasMore: rows.length > lim,
+        cards: rows.slice(0, lim).map((r) => ({
+          ...articleRow(r),
+          ...(r.discovered ? { atk: r.atk, def: r.def } : statsFor({ ...articleRow(r) })),
+          discovered: Boolean(r.discovered),
+          mine: r.mine,
+        })),
       };
     },
 

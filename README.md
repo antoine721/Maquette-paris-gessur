@@ -10,7 +10,7 @@ Inspiré de WikiMasters (mêmes raretés, mêmes seuils, mêmes fourchettes d'at
 - **Six boosters** dans un carrousel 3D : Encyclopédie (tout Wikipédia), Personnalités, Tour du monde, Règne vivant, Pop culture, Savoirs. Ouverture ×1 ou ×10, aucune limite.
 - **Ouverture façon TCG Pocket** : on découpe le haut du paquet en glissant le doigt, les cartes sortent, on les retourne une à une (une grande rareté brille avant d'être retournée, puis rayons, confettis et bandeau), et on les fait glisser pour passer à la suivante. Mode « ouverture rapide » pour enchaîner.
 - **Cartes** : illustration de l'article, famille, pastilles de rareté, ATK et DEF, label « Article de qualité » ou « Bon article ». Ultra rares et Légendaires en illustration pleine carte, reflets holographiques qui suivent le doigt, version **Shiny** arc-en-ciel.
-- **Collection** et **Cartothèque** (toutes les cartes découvertes par le groupe) : filtres par rareté et famille, recherche, tri, vue grille ou tableau.
+- **Collection** et **Cartothèque** : les cartes découvertes par le groupe, ou **tout Wikipédia** (chaque article illustré est une carte possible, avec aperçu même s'il n'a jamais été tiré). Filtres par rareté et famille, recherche, tri, vue grille ou tableau.
 - **Fiche carte** : statistiques, courbe des vues sur 30 jours, exemplaires numérotés, qui la possède, lien vers l'article.
 - **Amis** : podium et classement, fil en direct (belles prises, cadeaux), toasts quand un ami tire une Légendaire, cadeau d'un exemplaire à un ami.
 - **Profil** : statistiques, répartition des raretés, **vitrine** de 5 cartes.
@@ -35,6 +35,17 @@ Inspiré de WikiMasters (mêmes raretés, mêmes seuils, mêmes fourchettes d'at
 
 Tous ces réglages sont regroupés dans [`server/cards.js`](server/cards.js).
 
+## Tout Wikipédia dans la base
+
+Au démarrage, le serveur **indexe tout Wikipédia** en tâche de fond ([`server/indexer.js`](server/indexer.js)) :
+
+- il parcourt chaque article par ordre alphabétique (API `generator=allpages`), 50 à la fois, une requête après l'autre avec une courte pause et le paramètre `maxlag`, comme le demandent les règles d'usage de Wikimedia ;
+- pour chaque article il garde : titre, image, description, identifiant Wikidata, famille, longueur, nombre de langues, label de qualité, vues sur 30 jours et donc rareté. Les pages d'homonymie sont écartées ; le texte d'introduction n'est chargé qu'au premier tirage d'une carte ;
+- l'avancement est sauvegardé après chaque lot : un redémarrage reprend là où il s'était arrêté. Un nouveau passage a lieu tous les 30 jours pour rafraîchir la popularité ;
+- tant que le premier passage n'est pas terminé, les boosters sont tirés directement dans Wikipédia ; ensuite, chaque carte est tirée dans tout l'index.
+
+Wikipédia en français compte environ 2,7 millions d'articles. À ce rythme, un passage complet prend de l'ordre de deux jours et la table `articles` pèse quelques centaines de mégaoctets. L'avancement est visible dans **Cartothèque → Tout Wikipédia**. On peut aussi indexer sans lancer le site : `npm run index` (Ctrl+C pour mettre en pause, relancer pour reprendre).
+
 ## Lancer le jeu
 
 Il faut **Node 22.13 ou plus récent** (la base de données utilise le module SQLite intégré à Node).
@@ -50,7 +61,8 @@ Pour développer :
 ```bash
 npm run dev        # interface sur http://localhost:5173, Wikipédia simulé (hors ligne)
 WIKI_MOCK=0 npm run dev   # même chose avec le vrai Wikipédia
-npm test           # 29 tests (règles, tirages, API)
+npm test           # 35 tests (règles, tirages, indexation, API)
+npm run index      # indexer tout Wikipédia sans lancer le site
 ```
 
 ### Variables d'environnement
@@ -63,6 +75,8 @@ npm test           # 29 tests (règles, tirages, API)
 | `WIKI_LANG` | édition de Wikipédia utilisée | `fr` |
 | `WIKI_USER_AGENT` | identification envoyée à Wikimedia (mets-y un moyen de te contacter) | WikiPacks + lien du repo |
 | `WIKI_MOCK` | `1` pour un faux Wikipédia hors ligne | vide |
+| `WIKI_INDEX` | `0` pour ne pas indexer tout Wikipédia | vide (indexation active) |
+| `WIKI_INDEX_PAUSE_MS` | pause entre deux lots de 50 articles | `300` |
 
 ## Jouer avec ses amis : mettre le site en ligne
 
@@ -95,7 +109,8 @@ L'ancienne maquette Guessr Group reste dans l'historique git (commit `a16f7b3`).
 server/            API Node sans dépendance (node:http, node:sqlite, node:crypto)
   cards.js         règles : raretés, stats, Shiny, familles, boosters
   wiki.js          client de l'API Wikipédia et des statistiques Wikimedia
-  packs.js         fabrique de boosters (réserves d'articles mesurés par rareté)
+  packs.js         fabrique de boosters (index complet, ou réserves d'articles mesurés)
+  indexer.js       indexation de tout Wikipédia en tâche de fond
   db.js            schéma SQLite et migrations, requêtes
   app.js           routes HTTP, sessions, flux en direct (Server-Sent Events)
   mock-wiki.js     faux Wikipédia pour jouer et tester hors ligne

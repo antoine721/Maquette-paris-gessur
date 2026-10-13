@@ -154,6 +154,12 @@ export default function CardPage() {
           <h1 className="mt-4 font-serif text-[clamp(32px,5vw,52px)] leading-[1.02] font-semibold tracking-[-.015em]">{card.title}</h1>
           {card.description ? <p className="mt-2 font-serif text-[18px] text-muted italic">{card.description}</p> : null}
           {card.extract ? <p className="mt-4 max-w-[68ch] font-serif text-[16px] leading-relaxed text-text/85">{card.extract}</p> : null}
+          {card.preview ? (
+            <p className="mt-5 rounded-2xl border border-line-2 bg-white/[.04] p-4 text-[14px] text-muted">
+              <b className="text-text">Personne n’a encore tiré cette carte.</b> Voici un aperçu : sa rareté et ses statistiques seront figées pour tout le groupe au
+              premier tirage, d’après la popularité de l’article à ce moment-là.
+            </p>
+          ) : null}
 
           <div className="mt-7 grid gap-5 sm:grid-cols-2">
             <Panel>
@@ -182,7 +188,11 @@ export default function CardPage() {
               <Fact label="En circulation" value={fmt(card.totalCopies)} sub={`exemplaire${card.totalCopies > 1 ? 's' : ''} dans le groupe`} />
               <Fact label="Longueur" value={fmtBytes(card.length)} sub="de texte" />
               <Fact label="Langues" value={card.langs == null ? '?' : fmt(card.langs)} sub={card.langs === 1 ? 'édition de Wikipédia' : 'éditions de Wikipédia'} />
-              <Fact label="Découverte" value={new Date(card.discoveredAt).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })} sub={new Date(card.discoveredAt).getFullYear()} />
+              {card.preview ? (
+                <Fact label="Découverte" value="pas encore" sub="jamais tirée" />
+              ) : (
+                <Fact label="Découverte" value={new Date(card.discoveredAt).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })} sub={new Date(card.discoveredAt).getFullYear()} />
+              )}
               <Fact label="Numéro" value={`n° ${card.pageId}`} sub={card.wikidata ?? 'page Wikipédia'} />
             </div>
           </div>
@@ -196,7 +206,11 @@ export default function CardPage() {
               </span>
             }
           >
-            <ViewsChart daily={card.daily} color={r.color} endAt={card.discoveredAt} />
+            {card.preview ? (
+              <p className="text-[13.5px] text-muted">Les vues jour par jour seront relevées au premier tirage. Popularité actuelle : {fmt(card.views30)} vues sur 30 jours.</p>
+            ) : (
+              <ViewsChart daily={card.daily} color={r.color} endAt={card.discoveredAt} />
+            )}
           </Panel>
 
           <div className="mt-5 grid gap-5 md:grid-cols-2">

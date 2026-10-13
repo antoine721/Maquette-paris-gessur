@@ -6,6 +6,8 @@ import { Feed } from '../components/Feed.jsx';
 import { OddsModal, RarityLadder } from '../components/Odds.jsx';
 import { PackArt } from '../components/PackArt.jsx';
 import { Button, CountUp, Kbd, LiveDot, Page, Panel, TypeTag } from '../components/ui.jsx';
+import { api } from '../lib/api.js';
+import { fmt } from '../lib/format.js';
 import { useSession } from '../lib/session.jsx';
 import { Opening } from './Opening.jsx';
 
@@ -68,7 +70,15 @@ export default function Boosters() {
   const [fast, setFast] = useState(() => store.get(FAST_KEY, '0') === '1');
   const [opening, setOpening] = useState(null);
   const [odds, setOdds] = useState(false);
+  const [possible, setPossible] = useState(null);
   const pack = packs[index];
+
+  useEffect(() => {
+    api
+      .wiki()
+      .then((d) => setPossible(d.index?.illustrated || null))
+      .catch(() => {});
+  }, []);
 
   const select = useCallback(
     (i) => {
@@ -195,7 +205,10 @@ export default function Boosters() {
             <AnimatePresence mode="wait">
               <motion.div key={pack.key} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.2 }}>
                 <h2 className="text-[26px] font-extrabold tracking-[-.02em]">{pack.label}</h2>
-                <p className="text-muted">{pack.tagline}</p>
+                <p className="text-muted">
+                  {pack.tagline}
+                  {possible && !pack.types ? ` · ${fmt(possible)} cartes possibles` : ''}
+                </p>
                 <div className="mt-3 flex flex-wrap justify-center gap-1.5">
                   {(pack.types ?? ['personnalite', 'lieu', 'nature', 'culture', 'sport', 'histoire', 'sciences']).map((t) => (
                     <TypeTag key={t} type={t} size="sm" />

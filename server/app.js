@@ -51,7 +51,7 @@ class HttpError extends Error {
   }
 }
 
-export function createApp({ db, packs, publicDir, inviteCode = '', wikiLang = 'fr', mockImage = null, log = console }) {
+export function createApp({ db, packs, publicDir, inviteCode = '', wikiLang = 'fr', mockImage = null, indexer = null, log = console }) {
   const live = createLive();
   const limiter = createLoginLimiter();
   const opening = new Set();
@@ -232,6 +232,24 @@ export function createApp({ db, packs, publicDir, inviteCode = '', wikiLang = 'f
       sort: p.get('sort') ?? 'rarity',
       limit: Number(p.get('limit')) || 60,
       offset: Number(p.get('offset')) || 0,
+      viewerId: user.id,
+    });
+  });
+
+  // ---------- Tout Wikipédia ----------
+
+  route('GET', '/api/wiki', () => ({ index: indexer ? indexer.status() : null }));
+
+  route('GET', '/api/wiki/articles', ({ url, user }) => {
+    const p = url.searchParams;
+    const rarity = p.has('rarity') && p.get('rarity') !== '' ? Number(p.get('rarity')) : null;
+    return db.browseArticles({
+      q: String(p.get('q') ?? '').trim().slice(0, 80),
+      rarity: Number.isInteger(rarity) && rarity >= 0 && rarity <= 5 ? rarity : null,
+      type: TYPES.some((t) => t.key === p.get('type')) ? p.get('type') : null,
+      sort: p.get('sort') === 'alpha' ? 'alpha' : 'views',
+      limit: p.get('limit'),
+      offset: p.get('offset'),
       viewerId: user.id,
     });
   });
