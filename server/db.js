@@ -1,86 +1,164 @@
 // Stockage SQLite (module node:sqlite intégré à Node 22, aucune dépendance).
+// Le schéma évolue par migrations numérotées (PRAGMA user_version).
 import { DatabaseSync } from 'node:sqlite';
-import { RARITIES, scoreOf } from './cards.js';
+import { RARITIES, scoreOf, shinyStats } from './cards.js';
 
-const SCHEMA = `
-CREATE TABLE IF NOT EXISTS users (
-  id INTEGER PRIMARY KEY,
-  username TEXT NOT NULL UNIQUE COLLATE NOCASE,
-  password_hash TEXT NOT NULL,
-  packs_opened INTEGER NOT NULL DEFAULT 0,
-  created_at INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS sessions (
-  token_hash TEXT PRIMARY KEY,
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  expires_at INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS cards (
-  page_id INTEGER PRIMARY KEY,
-  title TEXT NOT NULL,
-  description TEXT NOT NULL DEFAULT '',
-  extract TEXT NOT NULL DEFAULT '',
-  image TEXT,
-  length INTEGER NOT NULL DEFAULT 0,
-  views REAL NOT NULL DEFAULT 0,
-  langs INTEGER,
-  rarity INTEGER NOT NULL,
-  atk INTEGER NOT NULL,
-  def INTEGER NOT NULL,
-  created_at INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS owned (
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  page_id INTEGER NOT NULL REFERENCES cards(page_id),
-  count INTEGER NOT NULL,
-  first_at INTEGER NOT NULL,
-  last_at INTEGER NOT NULL,
-  PRIMARY KEY (user_id, page_id)
-);
-CREATE TABLE IF NOT EXISTS events (
-  id INTEGER PRIMARY KEY,
-  type TEXT NOT NULL,
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  target_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-  page_id INTEGER REFERENCES cards(page_id),
-  created_at INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS events_recent ON events (id DESC);
-CREATE INDEX IF NOT EXISTS sessions_user ON sessions (user_id);
-`;
+const MIGRATIONS = [
+  // 1 : schéma initial.
+  `
+  CREATE TABLE users (
+    id INTEGER PRIMARY KEY,
+    username TEXT NOT NULL UNIQUE COLLATE NOCASE CHECK (length(username) BETWEEN 3 AND 20),
+    password_hash TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
 
-const LIST_COLUMNS = 'c.page_id, c.title, c.description, c.image, c.length, c.views, c.langs, c.rarity, c.atk, c.def';
+  CREATE TABLE sessions (
+    token_hash TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at INTEGER NOT NULL
+  );
+  CREATE INDEX sessions_user ON sessions (user_id);
 
-function toCard(row, withExtract = false) {
+  -- Une carte = un article de Wikipédia, figé au premier tirage.
+  CREATE TABLE cards (
+    page_id INTEGER PRIMARY KEY,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    extract TEXT NOT NULL DEFAULT '',
+    image TEXT NOT NULL,
+    image_width INTEGER,
+    image_height INTEGER,
+    wikidata TEXT CHECK (wikidata IS NULL OR wikidata GLOB 'Q[0-9]*'),
+    type TEXT NOT NULL,
+    rarity INTEGER NOT NULL CHECK (rarity BETWEEN 0 AND 5),
+    atk INTEGER NOT NULL CHECK (atk >= 0),
+    def INTEGER NOT NULL CHECK (def >= 0),
+    views30 INTEGER NOT NULL DEFAULT 0 CHECK (views30 >= 0),
+    daily_views TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(daily_views)),
+    length INTEGER NOT NULL DEFAULT 0,
+    langs INTEGER,
+    quality TEXT CHECK (quality IN ('AdQ', 'BA')),
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX cards_rarity ON cards (rarity, views30 DESC);
+  CREATE INDEX cards_type ON cards (type);
+
+  CREATE TABLE packs (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    theme TEXT NOT NULL,
+    opened_at INTEGER NOT NULL
+  );
+  CREATE INDEX packs_user ON packs (user_id);
+
+  -- Chaque exemplaire est distinct : numéro de série par carte, Shiny ou non.
+  CREATE TABLE copies (
+    id INTEGER PRIMARY KEY,
+    card_id INTEGER NOT NULL REFERENCES cards(page_id),
+    owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    serial INTEGER NOT NULL CHECK (serial > 0),
+    shiny INTEGER NOT NULL DEFAULT 0 CHECK (shiny IN (0, 1)),
+    pack_id INTEGER REFERENCES packs(id) ON DELETE SET NULL,
+    gifted_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    obtained_at INTEGER NOT NULL,
+    UNIQUE (card_id, serial)
+  );
+  CREATE INDEX copies_owner ON copies (owner_id, card_id);
+
+  -- Vitrine : jusqu'à 5 exemplaires mis en avant sur le profil.
+  CREATE TABLE showcase (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    slot INTEGER NOT NULL CHECK (slot BETWEEN 1 AND 5),
+    copy_id INTEGER NOT NULL UNIQUE REFERENCES copies(id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, slot)
+  );
+
+  CREATE TABLE events (
+    id INTEGER PRIMARY KEY,
+    type TEXT NOT NULL CHECK (type IN ('pull', 'gift', 'join')),
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    target_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    card_id INTEGER REFERENCES cards(page_id),
+    copy_id INTEGER REFERENCES copies(id) ON DELETE SET NULL,
+    shiny INTEGER NOT NULL DEFAULT 0 CHECK (shiny IN (0, 1)),
+    created_at INTEGER NOT NULL
+  );
+  `,
+];
+
+// Le prototype précédent n'a jamais été déployé : ses tables sont simplement remplacées.
+const PROTOTYPE_TABLES = ['owned', 'events', 'cards', 'sessions', 'users'];
+
+function migrate(db) {
+  const version = db.prepare('PRAGMA user_version').get().user_version;
+  if (version === 0 && db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'owned'").get()) {
+    db.exec('PRAGMA foreign_keys = OFF');
+    for (const t of PROTOTYPE_TABLES) db.exec(`DROP TABLE IF EXISTS ${t}`);
+    db.exec('PRAGMA foreign_keys = ON');
+  }
+  for (let v = version; v < MIGRATIONS.length; v++) {
+    db.exec('BEGIN');
+    try {
+      db.exec(MIGRATIONS[v]);
+      db.exec(`PRAGMA user_version = ${v + 1}`);
+      db.exec('COMMIT');
+    } catch (e) {
+      db.exec('ROLLBACK');
+      throw e;
+    }
+  }
+}
+
+const CARD_COLUMNS = `c.page_id, c.title, c.description, c.image, c.image_width, c.image_height, c.wikidata,
+  c.type, c.rarity, c.atk, c.def, c.views30, c.length, c.langs, c.quality, c.created_at`;
+
+function toCard(row, { full = false } = {}) {
   if (!row) return null;
   const card = {
     pageId: row.page_id,
     title: row.title,
     description: row.description,
     image: row.image,
-    length: row.length,
-    views: row.views,
-    langs: row.langs,
+    imageWidth: row.image_width,
+    imageHeight: row.image_height,
+    wikidata: row.wikidata,
+    type: row.type,
     rarity: row.rarity,
     atk: row.atk,
     def: row.def,
+    views30: row.views30,
+    length: row.length,
+    langs: row.langs,
+    quality: row.quality,
+    discoveredAt: row.created_at,
   };
-  if (withExtract) card.extract = row.extract;
-  if (row.count != null) {
-    card.count = row.count;
-    card.firstAt = row.first_at;
-    card.lastAt = row.last_at;
+  if (full) {
+    card.extract = row.extract;
+    card.daily = JSON.parse(row.daily_views || '[]');
   }
   return card;
 }
 
-const pointsCase = `CASE c.rarity ${RARITIES.map((r) => `WHEN ${r.id} THEN ${r.points}`).join(' ')} ELSE 0 END`;
-const rarityCounts = RARITIES.map((r) => `COALESCE(SUM(c.rarity = ${r.id}), 0) AS r${r.id}`).join(', ');
+// Un exemplaire tel qu'on l'affiche : un Shiny montre ses statistiques boostées.
+export function copyView(card, { copyId, serial, shiny }) {
+  const stats = shiny ? shinyStats(card, card.rarity) : { atk: card.atk, def: card.def };
+  return { ...card, ...stats, copyId, serial, shiny: Boolean(shiny) };
+}
+
+const SORTS = {
+  rarity: 'c.rarity DESC, c.views30 DESC',
+  recent: 'c.created_at DESC',
+  views: 'c.views30 DESC',
+  atk: 'MAX(c.atk, c.def) DESC',
+  alpha: 'c.title COLLATE NOCASE ASC',
+  copies: 'copies DESC, c.rarity DESC',
+};
 
 export function openDb(file) {
   const db = new DatabaseSync(file);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
-  db.exec(SCHEMA);
+  migrate(db);
 
   const q = {
     createUser: db.prepare('INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)'),
@@ -92,37 +170,74 @@ export function openDb(file) {
     ),
     deleteSession: db.prepare('DELETE FROM sessions WHERE token_hash = ?'),
     purgeSessions: db.prepare('DELETE FROM sessions WHERE expires_at <= ?'),
+
     card: db.prepare('SELECT * FROM cards WHERE page_id = ?'),
     insertCard: db.prepare(`INSERT OR IGNORE INTO cards
-      (page_id, title, description, extract, image, length, views, langs, rarity, atk, def, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-    addOwned: db.prepare(`INSERT INTO owned (user_id, page_id, count, first_at, last_at) VALUES (?, ?, 1, ?, ?)
-      ON CONFLICT (user_id, page_id) DO UPDATE SET count = count + 1, last_at = excluded.last_at
-      RETURNING count`),
-    owned: db.prepare('SELECT count FROM owned WHERE user_id = ? AND page_id = ?'),
-    decOwned: db.prepare('UPDATE owned SET count = count - 1 WHERE user_id = ? AND page_id = ?'),
-    dropEmpty: db.prepare('DELETE FROM owned WHERE user_id = ? AND page_id = ? AND count <= 0'),
-    bumpPacks: db.prepare('UPDATE users SET packs_opened = packs_opened + 1 WHERE id = ?'),
-    collection: db.prepare(`SELECT ${LIST_COLUMNS}, o.count, o.first_at, o.last_at
-      FROM owned o JOIN cards c ON c.page_id = o.page_id WHERE o.user_id = ? ORDER BY o.last_at DESC`),
-    ownedCard: db.prepare(`SELECT c.*, o.count, o.first_at, o.last_at
-      FROM cards c LEFT JOIN owned o ON o.page_id = c.page_id AND o.user_id = ? WHERE c.page_id = ?`),
-    owners: db.prepare(`SELECT u.username, o.count FROM owned o JOIN users u ON u.id = o.user_id
-      WHERE o.page_id = ? ORDER BY o.first_at`),
-    players: db.prepare(`SELECT u.id, u.username, u.packs_opened, u.created_at,
-        COALESCE(SUM(o.count), 0) AS total, COUNT(o.page_id) AS uniq, ${rarityCounts}
-      FROM users u LEFT JOIN owned o ON o.user_id = u.id LEFT JOIN cards c ON c.page_id = o.page_id
-      GROUP BY u.id`),
-    stats: db.prepare(`SELECT COALESCE(SUM(o.count), 0) AS total, COUNT(o.page_id) AS uniq, ${rarityCounts},
-        COALESCE(SUM(${pointsCase}), 0) AS score
-      FROM owned o JOIN cards c ON c.page_id = o.page_id WHERE o.user_id = ?`),
+      (page_id, title, description, extract, image, image_width, image_height, wikidata, type, rarity, atk, def,
+       views30, daily_views, length, langs, quality, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+
+    insertPack: db.prepare('INSERT INTO packs (user_id, theme, opened_at) VALUES (?, ?, ?)'),
+    nextSerial: db.prepare('SELECT COALESCE(MAX(serial), 0) + 1 AS n FROM copies WHERE card_id = ?'),
+    ownedCount: db.prepare('SELECT COUNT(*) AS n FROM copies WHERE owner_id = ? AND card_id = ?'),
+    insertCopy: db.prepare(
+      'INSERT INTO copies (card_id, owner_id, serial, shiny, pack_id, gifted_by, obtained_at) VALUES (?, ?, ?, ?, ?, NULL, ?)',
+    ),
+    copy: db.prepare('SELECT * FROM copies WHERE id = ?'),
+    moveCopy: db.prepare('UPDATE copies SET owner_id = ?, gifted_by = ?, obtained_at = ? WHERE id = ?'),
+
+    collection: db.prepare(`SELECT ${CARD_COLUMNS}, COUNT(*) AS count, SUM(cp.shiny) AS shinies,
+        MIN(cp.serial) AS best_serial, MIN(cp.obtained_at) AS first_at, MAX(cp.obtained_at) AS last_at,
+        (SELECT x.id FROM copies x WHERE x.card_id = cp.card_id AND x.owner_id = cp.owner_id
+          ORDER BY x.shiny DESC, x.serial ASC LIMIT 1) AS best_copy
+      FROM copies cp JOIN cards c ON c.page_id = cp.card_id
+      WHERE cp.owner_id = ? GROUP BY cp.card_id`),
+    myCopies: db.prepare(`SELECT cp.id, cp.serial, cp.shiny, cp.obtained_at, g.username AS gifted_by
+      FROM copies cp LEFT JOIN users g ON g.id = cp.gifted_by
+      WHERE cp.owner_id = ? AND cp.card_id = ? ORDER BY cp.shiny DESC, cp.serial ASC`),
+    owners: db.prepare(`SELECT u.username, COUNT(*) AS count, SUM(cp.shiny) AS shinies
+      FROM copies cp JOIN users u ON u.id = cp.owner_id WHERE cp.card_id = ?
+      GROUP BY cp.owner_id ORDER BY count DESC, u.username`),
+    totalCopies: db.prepare('SELECT COUNT(*) AS n FROM copies WHERE card_id = ?'),
+
+    statsByRarity: db.prepare(`SELECT c.rarity, COUNT(DISTINCT cp.card_id) AS uniq, COUNT(*) AS total,
+        COUNT(DISTINCT CASE WHEN cp.shiny = 1 THEN cp.card_id END) AS shiny_uniq
+      FROM copies cp JOIN cards c ON c.page_id = cp.card_id WHERE cp.owner_id = ? GROUP BY c.rarity`),
+    allStatsByRarity: db.prepare(`SELECT cp.owner_id, c.rarity, COUNT(DISTINCT cp.card_id) AS uniq, COUNT(*) AS total,
+        COUNT(DISTINCT CASE WHEN cp.shiny = 1 THEN cp.card_id END) AS shiny_uniq
+      FROM copies cp JOIN cards c ON c.page_id = cp.card_id GROUP BY cp.owner_id, c.rarity`),
+    packCount: db.prepare('SELECT COUNT(*) AS n FROM packs WHERE user_id = ?'),
+    allPackCounts: db.prepare('SELECT user_id, COUNT(*) AS n FROM packs GROUP BY user_id'),
+    users: db.prepare('SELECT id, username, created_at FROM users'),
+    bestCopy: db.prepare(`SELECT cp.id AS copy_id, cp.serial, cp.shiny, ${CARD_COLUMNS}
+      FROM copies cp JOIN cards c ON c.page_id = cp.card_id WHERE cp.owner_id = ?
+      ORDER BY c.rarity DESC, cp.shiny DESC, c.views30 DESC LIMIT 1`),
+
+    showcase: db.prepare(`SELECT s.slot, cp.id AS copy_id, cp.serial, cp.shiny, ${CARD_COLUMNS}
+      FROM showcase s JOIN copies cp ON cp.id = s.copy_id JOIN cards c ON c.page_id = cp.card_id
+      WHERE s.user_id = ? ORDER BY s.slot`),
+    clearShowcase: db.prepare('DELETE FROM showcase WHERE user_id = ?'),
+    setShowcase: db.prepare('INSERT INTO showcase (user_id, slot, copy_id) VALUES (?, ?, ?)'),
+    unshowcaseCopy: db.prepare('DELETE FROM showcase WHERE copy_id = ?'),
+
+    searchCards: db.prepare(`SELECT ${CARD_COLUMNS} FROM cards c WHERE c.title LIKE ? ESCAPE '\\'
+      ORDER BY (c.title LIKE ? ESCAPE '\\') DESC, c.rarity DESC, c.views30 DESC LIMIT 8`),
+    searchUsers: db.prepare(`SELECT username FROM users WHERE username LIKE ? ESCAPE '\\' ORDER BY username LIMIT 5`),
+
+    addEvent: db.prepare(
+      'INSERT INTO events (type, user_id, target_id, card_id, copy_id, shiny, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    ),
     lastEvent: db.prepare('SELECT COALESCE(MAX(id), 0) AS id FROM events'),
-    addEvent: db.prepare('INSERT INTO events (type, user_id, target_id, page_id, created_at) VALUES (?, ?, ?, ?, ?)'),
-    feed: db.prepare(`SELECT e.id, e.type, e.created_at, u.username AS user, t.username AS target,
-        c.page_id, c.title, c.rarity, c.image
+    feed: db.prepare(`SELECT e.id, e.type, e.created_at, e.shiny, u.username AS user, t.username AS target,
+        c.page_id, c.title, c.rarity, c.image, c.type AS card_type
       FROM events e JOIN users u ON u.id = e.user_id
-      LEFT JOIN users t ON t.id = e.target_id LEFT JOIN cards c ON c.page_id = e.page_id
+      LEFT JOIN users t ON t.id = e.target_id LEFT JOIN cards c ON c.page_id = e.card_id
       WHERE e.id < ? ORDER BY e.id DESC LIMIT ?`),
+    feedAfter: db.prepare(`SELECT e.id, e.type, e.created_at, e.shiny, u.username AS user, t.username AS target,
+        c.page_id, c.title, c.rarity, c.image, c.type AS card_type
+      FROM events e JOIN users u ON u.id = e.user_id
+      LEFT JOIN users t ON t.id = e.target_id LEFT JOIN cards c ON c.page_id = e.card_id
+      WHERE e.id > ? ORDER BY e.id ASC LIMIT 100`),
   };
 
   function tx(fn) {
@@ -144,13 +259,32 @@ export function openDb(file) {
       at: r.created_at,
       user: r.user,
       target: r.target ?? null,
-      card: r.page_id ? { pageId: r.page_id, title: r.title, rarity: r.rarity, image: r.image } : null,
+      shiny: Boolean(r.shiny),
+      card: r.page_id ? { pageId: r.page_id, title: r.title, rarity: r.rarity, image: r.image, type: r.card_type } : null,
     };
   }
 
-  function statsRow(r) {
-    const byRarity = RARITIES.map((x) => Number(r[`r${x.id}`] ?? 0));
-    return { total: Number(r.total ?? 0), unique: Number(r.uniq ?? 0), byRarity, score: scoreOf(byRarity) };
+  function statsFrom(rows, packs) {
+    const byRarity = RARITIES.map(() => 0);
+    const shinyByRarity = RARITIES.map(() => 0);
+    let total = 0;
+    for (const r of rows) {
+      byRarity[r.rarity] = Number(r.uniq);
+      shinyByRarity[r.rarity] = Number(r.shiny_uniq);
+      total += Number(r.total);
+    }
+    const unique = byRarity.reduce((a, b) => a + b, 0);
+    const shinies = shinyByRarity.reduce((a, b) => a + b, 0);
+    return { packs, total, unique, shinies, byRarity, shinyByRarity, score: scoreOf(byRarity, shinyByRarity) };
+  }
+
+  function bestOf(userId) {
+    const r = q.bestCopy.get(userId);
+    return r ? copyView(toCard(r), { copyId: r.copy_id, serial: r.serial, shiny: r.shiny }) : null;
+  }
+
+  function showcaseOf(userId) {
+    return q.showcase.all(userId).map((r) => ({ slot: r.slot, ...copyView(toCard(r), { copyId: r.copy_id, serial: r.serial, shiny: r.shiny }) }));
   }
 
   return {
@@ -162,7 +296,6 @@ export function openDb(file) {
       return q.userById.get(Number(lastInsertRowid));
     },
     userByName: (name) => q.userByName.get(name) ?? null,
-    userById: (id) => q.userById.get(id) ?? null,
 
     createSession: (tokenHash, userId, expiresAt) => q.createSession.run(tokenHash, userId, expiresAt),
     sessionUser: (tokenHash) => q.sessionUser.get(tokenHash, Date.now()) ?? null,
@@ -173,73 +306,169 @@ export function openDb(file) {
       const map = new Map();
       for (const id of ids) {
         const row = q.card.get(id);
-        if (row) map.set(id, toCard(row, true));
+        if (row) map.set(id, toCard(row, { full: true }));
       }
       return map;
     },
     insertCard(c) {
+      if (!c.image) return;
       q.insertCard.run(
-        c.pageId, c.title, c.description, c.extract, c.image, c.length, c.views, c.langs, c.rarity, c.atk, c.def,
-        Date.now(),
+        c.pageId, c.title, c.description, c.extract, c.image, c.imageWidth, c.imageHeight, c.wikidata, c.type,
+        c.rarity, c.atk, c.def, c.views30, JSON.stringify(c.daily ?? []), c.length, c.langs, c.quality, Date.now(),
       );
     },
 
-    // Enregistre un booster ouvert : ajoute les cartes et note les belles prises dans le fil.
-    recordPack(userId, cards, notableRarity = 3) {
+    // Enregistre des boosters ouverts. Les belles prises (Super rare et plus, ou Shiny) vont dans le fil.
+    recordPacks(userId, theme, packs, notableRarity = 3) {
       return tx(() => {
         const now = Date.now();
-        q.bumpPacks.run(userId);
-        const results = cards.map((c) => {
-          const { count } = q.addOwned.get(userId, c.pageId, now, now);
-          if (c.rarity >= notableRarity) q.addEvent.run('pull', userId, null, c.pageId, now);
-          return { ...c, count, isNew: count === 1 };
+        return packs.map((cards) => {
+          const packId = Number(q.insertPack.run(userId, theme, now).lastInsertRowid);
+          return cards.map(({ card, shiny }) => {
+            const isNew = q.ownedCount.get(userId, card.pageId).n === 0;
+            const serial = q.nextSerial.get(card.pageId).n;
+            const copyId = Number(q.insertCopy.run(card.pageId, userId, serial, shiny ? 1 : 0, packId, now).lastInsertRowid);
+            if (card.rarity >= notableRarity || shiny) q.addEvent.run('pull', userId, null, card.pageId, copyId, shiny ? 1 : 0, now);
+            const count = q.ownedCount.get(userId, card.pageId).n;
+            return { ...copyView(card, { copyId, serial, shiny }), isNew, count };
+          });
         });
-        return results;
       });
     },
 
-    collection: (userId) => q.collection.all(userId).map((r) => toCard(r)),
-    card(pageId, userId) {
-      const row = q.ownedCard.get(userId ?? 0, pageId);
+    collection(userId) {
+      return q.collection.all(userId).map((r) => {
+        const card = toCard(r);
+        const shinies = Number(r.shinies);
+        return {
+          ...card,
+          ...(shinies ? shinyStats(card, card.rarity) : {}),
+          shiny: shinies > 0,
+          count: Number(r.count),
+          shinies,
+          bestSerial: r.best_serial,
+          bestCopyId: r.best_copy,
+          firstAt: r.first_at,
+          lastAt: r.last_at,
+        };
+      });
+    },
+
+    card(pageId, viewerId) {
+      const row = q.card.get(pageId);
       if (!row) return null;
-      const card = toCard(row, true);
-      card.owners = q.owners.all(pageId).map((o) => ({ username: o.username, count: o.count }));
+      const card = toCard(row, { full: true });
+      card.totalCopies = q.totalCopies.get(pageId).n;
+      card.owners = q.owners.all(pageId).map((o) => ({ username: o.username, count: Number(o.count), shinies: Number(o.shinies) }));
+      card.myCopies = q.myCopies.all(viewerId ?? 0, pageId).map((c) => ({
+        copyId: c.id,
+        serial: c.serial,
+        shiny: Boolean(c.shiny),
+        obtainedAt: c.obtained_at,
+        giftedBy: c.gifted_by,
+        ...(c.shiny ? shinyStats(card, card.rarity) : { atk: card.atk, def: card.def }),
+      }));
+      card.shinyStats = shinyStats(card, card.rarity);
       return card;
     },
 
+    // Tout le catalogue découvert par le groupe, façon base de données Futbin.
+    catalogue({ q: search = '', rarity = null, type = null, sort = 'rarity', limit = 60, offset = 0, viewerId = 0, mine = null }) {
+      const where = [];
+      const params = [];
+      if (search) {
+        where.push("c.title LIKE ? ESCAPE '\\'");
+        params.push(`%${search.replace(/[\\%_]/g, '\\$&')}%`);
+      }
+      if (rarity != null) {
+        where.push('c.rarity = ?');
+        params.push(rarity);
+      }
+      if (type) {
+        where.push('c.type = ?');
+        params.push(type);
+      }
+      if (mine === true) where.push('mine > 0');
+      if (mine === false) where.push('mine = 0');
+      const filter = where.length ? `WHERE ${where.join(' AND ')}` : '';
+      const base = `SELECT ${CARD_COLUMNS},
+          (SELECT COUNT(*) FROM copies x WHERE x.card_id = c.page_id) AS copies,
+          (SELECT COUNT(DISTINCT x.owner_id) FROM copies x WHERE x.card_id = c.page_id) AS owners,
+          (SELECT COUNT(*) FROM copies x WHERE x.card_id = c.page_id AND x.owner_id = ?) AS mine
+        FROM cards c`;
+      const wrapped = `SELECT * FROM (${base}) c ${filter}`;
+      const total = db.prepare(`SELECT COUNT(*) AS n FROM (${wrapped})`).get(viewerId, ...params).n;
+      const rows = db
+        .prepare(`${wrapped} ORDER BY ${SORTS[sort] ?? SORTS.rarity} LIMIT ? OFFSET ?`)
+        .all(viewerId, ...params, Math.min(limit, 120), Math.max(offset, 0));
+      return {
+        total,
+        cards: rows.map((r) => ({ ...toCard(r), copies: r.copies, owners: r.owners, mine: r.mine })),
+      };
+    },
+
     stats(userId) {
-      const user = q.userById.get(userId);
-      return { packs: user?.packs_opened ?? 0, ...statsRow(q.stats.get(userId)) };
+      return statsFrom(q.statsByRarity.all(userId), q.packCount.get(userId).n);
     },
 
     players() {
-      return q.players
+      const rows = new Map();
+      for (const r of q.allStatsByRarity.all()) {
+        if (!rows.has(r.owner_id)) rows.set(r.owner_id, []);
+        rows.get(r.owner_id).push(r);
+      }
+      const packs = new Map(q.allPackCounts.all().map((r) => [r.user_id, r.n]));
+      return q.users
         .all()
-        .map((r) => ({ username: r.username, packs: r.packs_opened, joinedAt: r.created_at, ...statsRow(r) }))
+        .map((u) => ({
+          username: u.username,
+          joinedAt: u.created_at,
+          ...statsFrom(rows.get(u.id) ?? [], packs.get(u.id) ?? 0),
+          showcase: showcaseOf(u.id),
+          bestCard: bestOf(u.id),
+        }))
         .sort((a, b) => b.score - a.score || b.unique - a.unique || a.joinedAt - b.joinedAt);
     },
 
-    gift(fromId, toId, pageId) {
+    showcase: showcaseOf,
+    setShowcase(userId, copyIds) {
       return tx(() => {
-        const row = q.owned.get(fromId, pageId);
-        if (!row || row.count < 1) return null;
-        const now = Date.now();
-        q.decOwned.run(fromId, pageId);
-        q.dropEmpty.run(fromId, pageId);
-        const { count } = q.addOwned.get(toId, pageId, now, now);
-        const { lastInsertRowid } = q.addEvent.run('gift', fromId, toId, pageId, now);
-        return { remaining: row.count - 1, received: count, eventId: Number(lastInsertRowid) };
+        for (const id of copyIds) {
+          const c = q.copy.get(id);
+          if (!c || c.owner_id !== userId) return false;
+        }
+        q.clearShowcase.run(userId);
+        copyIds.forEach((id, i) => q.setShowcase.run(userId, i + 1, id));
+        return true;
       });
     },
 
-    addEvent(type, userId, targetId = null, pageId = null) {
-      const { lastInsertRowid } = q.addEvent.run(type, userId, targetId, pageId, Date.now());
-      return Number(lastInsertRowid);
+    gift(fromId, toId, copyId) {
+      return tx(() => {
+        const c = q.copy.get(copyId);
+        if (!c || c.owner_id !== fromId) return null;
+        const now = Date.now();
+        q.moveCopy.run(toId, fromId, now, copyId);
+        q.unshowcaseCopy.run(copyId);
+        const eventId = Number(q.addEvent.run('gift', fromId, toId, c.card_id, copyId, c.shiny, now).lastInsertRowid);
+        return { eventId, cardId: c.card_id };
+      });
     },
-    feed: (limit = 30, before = Number.MAX_SAFE_INTEGER) => q.feed.all(before, limit).map(feedRow),
+
+    search(text) {
+      const like = `%${text.replace(/[\\%_]/g, '\\$&')}%`;
+      const prefix = `${text.replace(/[\\%_]/g, '\\$&')}%`;
+      return {
+        cards: q.searchCards.all(like, prefix).map((r) => toCard(r)),
+        players: q.searchUsers.all(like).map((r) => r.username),
+      };
+    },
+
+    addEvent(type, userId) {
+      return Number(q.addEvent.run(type, userId, null, null, null, 0, Date.now()).lastInsertRowid);
+    },
     lastEventId: () => Number(q.lastEvent.get().id),
-    feedSince(afterId) {
-      return q.feed.all(Number.MAX_SAFE_INTEGER, 50).map(feedRow).filter((e) => e.id > afterId).reverse();
-    },
+    feed: (limit = 30, before = Number.MAX_SAFE_INTEGER) => q.feed.all(before, limit).map(feedRow),
+    feedSince: (afterId) => q.feedAfter.all(afterId).map(feedRow),
   };
 }

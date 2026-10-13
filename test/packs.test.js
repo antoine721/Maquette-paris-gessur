@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { seeded } from '../server/cards.js';
 import { createMockFetch } from '../server/mock-wiki.js';
 import { createPackFactory } from '../server/packs.js';
 import { createWiki } from '../server/wiki.js';
@@ -11,88 +12,99 @@ function memoryStore() {
   return {
     cards,
     getCards: (ids) => new Map(ids.filter((id) => cards.has(id)).map((id) => [id, cards.get(id)])),
-    insertCard: (c) => cards.set(c.pageId, c),
+    insertCard: (c) => c.image && cards.set(c.pageId, c),
   };
 }
 
-function seeded(seed) {
-  let s = seed;
-  return () => {
-    s = (s * 16807) % 2147483647;
-    return s / 2147483647;
-  };
-}
+const wikiWith = (seed, wrap = (f) => f) => createWiki({ fetchImpl: wrap(createMockFetch({ latencyMs: 0, seed })), userAgent: 'test' });
 
-test('le client Wikipédia lit les réponses de l’API', async () => {
-  const wiki = createWiki({ fetchImpl: createMockFetch({ latencyMs: 0, seed: 1 }), userAgent: 'test' });
-  const random = await wiki.randomMeasured(30);
-  assert.ok(random.length > 20, 'des articles au hasard');
+test('le client lit les réponses de l’API et écarte les articles sans image ou d’homonymie', async () => {
+  let raw = null;
+  const wiki = wikiWith(1, (f) => async (url) => {
+    const res = await f(url);
+    if (String(url).includes('generator=random')) {
+      const body = await res.json();
+      raw = body.query.pages;
+      return { ok: true, status: 200, json: async () => body };
+    }
+    return res;
+  });
+  const random = await wiki.randomMeasured(50);
+  const kept = raw.filter((p) => p.thumbnail && !p.pageprops?.disambiguation).length;
+  assert.equal(random.length, kept, 'seuls les articles illustrés, hors homonymie');
+  assert.ok(random.length < raw.length);
   for (const p of random) {
-    assert.equal(typeof p.pageId, 'number');
-    assert.ok(p.views >= 0);
+    assert.ok(p.image, 'chaque carte a une image');
+    assert.equal(p.daily.length, 30);
+    assert.ok(Number.isInteger(p.views30));
   }
-  const measured = await wiki.measureTitles(['Napoléon_Ier', 'Article qui n’existe pas']);
-  assert.equal(measured.length, 1);
-  assert.equal(measured[0].title, 'Napoléon Ier');
-  assert.equal(measured[0].rarity, 4);
-  const details = await wiki.details([measured[0].pageId]);
-  const d = details.get(measured[0].pageId);
+  const [napoleon] = await wiki.measureTitles(['Napoléon_Ier', 'Article qui n’existe pas']);
+  assert.equal(napoleon.title, 'Napoléon Ier');
+  assert.equal(napoleon.rarity, 5);
+  assert.equal(napoleon.type, 'personnalite');
+  assert.equal(napoleon.wikidata, `Q${napoleon.pageId}`);
+  const d = (await wiki.details([napoleon.pageId])).get(napoleon.pageId);
   assert.match(d.extract, /Ajaccio/);
   assert.equal(d.langs, 190);
-  assert.ok(d.image.startsWith('https://upload.wikimedia.org/'));
+  assert.equal(d.quality, 'AdQ');
   const top = await wiki.topMonth(2026, 9);
   assert.ok(top.some((a) => a.title === 'Paris'));
 });
 
-test('sans langlinkscount, la DEF se rabat sur la popularité', async () => {
-  const base = createMockFetch({ latencyMs: 0, seed: 2 });
-  const fetchImpl = async (url) => {
-    const res = await base(url);
+test('sans langlinkscount, la DEF se rabat sur la qualité estimée', async () => {
+  const wiki = wikiWith(2, (f) => async (url) => {
+    const res = await f(url);
     if (!String(url).includes('langlinkscount')) return res;
     const body = await res.json();
     body.warnings = { main: { warnings: 'Unrecognized value for parameter "prop": langlinkscount.' } };
     return { ok: true, status: 200, json: async () => body };
-  };
-  const wiki = createWiki({ fetchImpl, userAgent: 'test' });
-  const details = await wiki.details([1000]);
-  assert.equal(details.get(1000).langs, null);
+  });
+  assert.equal((await wiki.details([1000])).get(1000).langs, null);
 });
 
-test('un booster contient 5 cartes distinctes, la dernière au moins Rare', async () => {
-  const wiki = createWiki({ fetchImpl: createMockFetch({ latencyMs: 0, seed: 3 }), userAgent: 'test' });
-  const store = memoryStore();
-  const packs = createPackFactory({ wiki, store, rand: seeded(7), log: quiet });
+test('un booster : 5 cartes distinctes et illustrées, la dernière au moins Rare', async () => {
+  const packs = createPackFactory({ wiki: wikiWith(3), store: memoryStore(), rand: seeded(7), log: quiet });
   await packs.warmUp();
-  let featuredHigh = 0;
-  const N = 40;
+  let featuredRare = 0;
+  const N = 60;
   for (let i = 0; i < N; i++) {
-    const cards = await packs.generatePack();
-    assert.equal(cards.length, 5);
-    assert.equal(new Set(cards.map((c) => c.pageId)).size, 5, 'pas de doublon dans un booster');
-    if (cards[4].rarity >= 2) featuredHigh++;
-    for (const c of cards) assert.ok(c.title && c.atk >= 100 && c.def >= 100);
+    const [pack] = await packs.generatePacks('encyclopedie', 1);
+    assert.equal(pack.length, 5);
+    assert.equal(new Set(pack.map((x) => x.card.pageId)).size, 5, 'pas de doublon dans un booster');
+    for (const { card, shiny } of pack) {
+      assert.ok(card.image, 'carte illustrée');
+      assert.equal(typeof shiny, 'boolean');
+    }
+    if (pack[4].card.rarity >= 2) featuredRare++;
   }
-  assert.ok(featuredHigh >= N * 0.9, `carte vedette Rare+ dans ${featuredHigh}/${N} boosters`);
+  assert.ok(featuredRare >= N * 0.9, `carte vedette Rare+ dans ${featuredRare}/${N} boosters`);
 });
 
-test('les articles populaires ne remplissent pas les cartes ordinaires', async () => {
-  const wiki = createWiki({ fetchImpl: createMockFetch({ latencyMs: 0, seed: 4 }), userAgent: 'test' });
-  const store = memoryStore();
-  const packs = createPackFactory({ wiki, store, rand: seeded(11), log: quiet });
+test('×10 : dix boosters d’un coup', async () => {
+  const packs = createPackFactory({ wiki: wikiWith(4), store: memoryStore(), rand: seeded(11), log: quiet });
   await packs.warmUp();
-  let legendaryInFirstSlots = 0;
-  for (let i = 0; i < 30; i++) {
-    const cards = await packs.generatePack();
-    legendaryInFirstSlots += cards.slice(0, 4).filter((c) => c.rarity === 4).length;
+  const opened = await packs.generatePacks('encyclopedie', 10);
+  assert.equal(opened.length, 10);
+  assert.ok(opened.every((p) => p.length === 5));
+});
+
+test('un booster thématique ne contient que sa famille', async () => {
+  const packs = createPackFactory({ wiki: wikiWith(5), store: memoryStore(), rand: seeded(3), log: quiet });
+  await packs.warmUp();
+  let off = 0;
+  let total = 0;
+  for (let i = 0; i < 12; i++) {
+    const [pack] = await packs.generatePacks('nature', 1);
+    for (const { card } of pack) {
+      total++;
+      if (card.type !== 'nature') off++;
+    }
   }
-  assert.ok(legendaryInFirstSlots <= 2, `${legendaryInFirstSlots} légendaires hors carte vedette`);
+  assert.ok(off / total < 0.1, `${off}/${total} cartes hors famille`);
 });
 
 test('Wikipédia injoignable : erreur claire', async () => {
-  const wiki = createWiki({
-    fetchImpl: async () => ({ ok: false, status: 503, json: async () => ({}) }),
-    userAgent: 'test',
-  });
+  const wiki = createWiki({ fetchImpl: async () => ({ ok: false, status: 503, json: async () => ({}) }), userAgent: 'test' });
   const packs = createPackFactory({ wiki, store: memoryStore(), log: quiet });
-  await assert.rejects(packs.generatePack(), (err) => err.status === 503 && /Wikipédia/.test(err.message));
+  await assert.rejects(packs.generatePacks('encyclopedie', 1), (err) => err.status === 503 && /Wikipédia/.test(err.message));
 });

@@ -1,22 +1,33 @@
 // Fabrique de boosters.
-// Pour qu'un booster s'ouvre sans attendre, on garde en réserve des articles déjà mesurés :
-// - une file d'articles tirés au hasard (cartes 1 à 4) ;
-// - des réserves par rareté pour la carte vedette, alimentées par les articles les plus lus.
-import { PACK_SIZE, buildCard, isArticleTitle, rarityFromViews, rollFeatured } from './cards.js';
+// Chaque carte tire d'abord sa rareté (proportions du catalogue WikiMasters, carte 5 au moins Rare),
+// puis un article de cette rareté dans une réserve d'articles déjà mesurés :
+// - les articles tirés au hasard alimentent surtout les raretés courantes ;
+// - les articles les plus lus des derniers mois alimentent les Super rares, Ultra rares et Légendaires.
+import {
+  FEATURED_ODDS,
+  MAX_RARITY,
+  PACK_SIZE,
+  SHINY_RATE,
+  SLOT_ODDS,
+  buildCard,
+  isArticleTitle,
+  packByKey,
+  rarityFromViews,
+  roll,
+} from './cards.js';
 
-const QUEUE_LOW = 40;
-const QUEUE_MAX = 200;
-const BUCKET_LOW = 6;
-const BUCKET_MAX = 30;
-const FEATURED_TIERS = [2, 3, 4];
+const LOW = [40, 25, 25, 12, 8, 5];
+const CAP = [200, 120, 120, 80, 60, 40];
+const DETAILS_CHUNK = 20;
+
+const unavailable = (msg) => Object.assign(new Error(msg), { status: 503 });
 
 export function createPackFactory({ wiki, store, rand = Math.random, log = console, poolMonths = 12 }) {
   let pool = [];
-  const queue = [];
-  const buckets = { 2: [], 3: [], 4: [] };
-  let refilling = null;
   let poolLoading = null;
   let poolTriedAt = 0;
+  let refilling = null;
+  const buffers = Array.from({ length: MAX_RARITY + 1 }, () => []);
 
   const sample = (arr, n) => {
     const copy = arr.slice();
@@ -41,19 +52,19 @@ export function createPackFactory({ wiki, store, rand = Math.random, log = conso
         if (r.status !== 'fulfilled') return;
         const [y, m] = months[i];
         const days = new Date(Date.UTC(y, m, 0)).getUTCDate();
-        // Un pic d'il y a six mois est probablement retombé depuis.
+        // Un pic d'il y a six mois est sans doute retombé depuis.
         const decay = i < 2 ? 1 : i < 6 ? 0.5 : 0.25;
         for (const a of r.value) {
           if (!isArticleTitle(a.title)) continue;
-          const est = (a.views / days) * decay;
+          const est = (a.views / days) * 30 * decay;
           if ((estimates.get(a.title) ?? 0) < est) estimates.set(a.title, est);
         }
       });
       if (estimates.size) {
         pool = [...estimates].map(([title, est]) => ({ title, tier: rarityFromViews(est) }));
-        log.info?.(`[packs] réserve d'articles populaires : ${pool.length} articles`);
+        log.info?.(`[packs] ${pool.length} articles populaires en réserve`);
       } else {
-        log.warn?.('[packs] impossible de charger les articles populaires, la carte vedette viendra du hasard');
+        log.warn?.('[packs] classements Wikimedia indisponibles, les grandes raretés viendront du hasard');
       }
     })().finally(() => {
       poolLoading = null;
@@ -61,112 +72,125 @@ export function createPackFactory({ wiki, store, rand = Math.random, log = conso
     return poolLoading;
   }
 
-  // Les articles tirés au hasard peuvent aller partout ; ceux des classements ne servent
-  // qu'à la carte vedette, sinon les premières cartes seraient bien trop souvent rares.
-  function stash(pages, fromPool = false) {
-    const known = new Set([...queue, ...buckets[2], ...buckets[3], ...buckets[4]].map((p) => p.pageId));
+  // Réserve pleine : les plus anciens articles sortent, pour que chaque famille garde des candidats frais.
+  function stash(pages) {
+    const known = new Set(buffers.flat().map((p) => p.pageId));
     for (const p of pages) {
       if (known.has(p.pageId)) continue;
       known.add(p.pageId);
-      const bucket = buckets[p.rarity];
-      if (bucket && bucket.length < BUCKET_MAX && (fromPool || p.rarity > 2 || bucket.length < BUCKET_LOW * 2)) bucket.push(p);
-      else if (!fromPool && queue.length < QUEUE_MAX) queue.push(p);
+      const bucket = buffers[p.rarity];
+      if (bucket.length >= CAP[p.rarity]) bucket.shift();
+      bucket.push(p);
     }
   }
 
-  async function fillBuckets() {
-    const lacking = FEATURED_TIERS.filter((t) => buckets[t].length < BUCKET_LOW);
+  async function fromPool() {
+    const lacking = [3, 4, 5].filter((t) => buffers[t].length < LOW[t]);
     if (!lacking.length || !pool.length) return;
-    const titles = [];
+    const titles = new Set();
     for (const t of lacking) {
-      const sameTier = pool.filter((p) => p.tier === t);
-      titles.push(...sample(sameTier.length ? sameTier : pool, Math.floor(48 / lacking.length)).map((p) => p.title));
+      const same = pool.filter((p) => p.tier >= t);
+      for (const p of sample(same.length ? same : pool, Math.floor(48 / lacking.length))) titles.add(p.title);
     }
-    stash(await wiki.measureTitles([...new Set(titles)]), true);
+    stash(await wiki.measureTitles([...titles].slice(0, 50)));
   }
 
-  function refill() {
+  function refill({ extraRandom = 0 } = {}) {
     if (refilling) return refilling;
-    // Si les classements n'ont pas pu être chargés (Wikipédia injoignable au démarrage), on retente.
     if (!pool.length && !poolLoading && Date.now() - poolTriedAt > 10 * 60 * 1000) loadPool().catch(() => {});
     refilling = (async () => {
       const jobs = [];
-      if (queue.length < QUEUE_LOW) jobs.push(wiki.randomMeasured(40).then((pages) => stash(pages)));
-      jobs.push(fillBuckets());
-      const results = await Promise.allSettled(jobs);
-      for (const r of results) if (r.status === 'rejected') log.warn?.(`[packs] réapprovisionnement : ${r.reason?.message}`);
+      const randomCalls = (buffers.slice(0, 4).some((b, t) => b.length < LOW[t]) ? 1 : 0) + extraRandom;
+      for (let i = 0; i < Math.min(randomCalls, 3); i++) jobs.push(wiki.randomMeasured(50).then(stash));
+      jobs.push(fromPool());
+      for (const r of await Promise.allSettled(jobs)) {
+        if (r.status === 'rejected') log.warn?.(`[packs] réapprovisionnement : ${r.reason?.message}`);
+      }
     })().finally(() => {
       refilling = null;
     });
     return refilling;
   }
 
-  function take(arr, used, pred = () => true) {
-    const i = arr.findIndex((p) => !used.has(p.pageId) && pred(p));
-    if (i < 0) return null;
-    const [p] = arr.splice(i, 1);
-    used.add(p.pageId);
-    return p;
+  // Un article de la rareté voulue (ou en dessous), de préférence dans les familles du booster.
+  function take(tier, types, used) {
+    const fits = (p) => !used.has(p.pageId) && (!types || types.includes(p.type));
+    for (let t = tier; t >= 0; t--) {
+      const i = buffers[t].findIndex(fits);
+      if (i >= 0) {
+        const [p] = buffers[t].splice(i, 1);
+        used.add(p.pageId);
+        return p;
+      }
+    }
+    return null;
   }
 
-  async function pickPages() {
-    for (let attempt = 0; queue.length < PACK_SIZE && attempt < 3; attempt++) await refill();
-    if (queue.length < PACK_SIZE - 1) throw Object.assign(new Error('Wikipédia ne répond pas, réessaie dans un instant.'), { status: 503 });
+  const stock = () => buffers.reduce((n, b) => n + b.length, 0);
 
+  async function pickPack(theme) {
+    const { types } = packByKey(theme);
+    const tiers = [...Array.from({ length: PACK_SIZE - 1 }, () => roll(SLOT_ODDS, rand)), roll(FEATURED_ODDS, rand)];
     const used = new Set();
-    const picked = [];
-    for (let i = 0; i < PACK_SIZE - 2; i++) picked.push(take(queue, used));
-    picked.push(take(queue, used, (p) => p.rarity >= 1) ?? take(queue, used));
-
-    const target = rollFeatured(rand);
-    if (!buckets[target].length && pool.length) await fillBuckets().catch(() => {});
-    let featured = null;
-    for (let t = target; t >= 2 && !featured; t--) featured = take(buckets[t], used);
-    if (!featured) {
-      const best = queue.filter((p) => !used.has(p.pageId)).sort((a, b) => b.views - a.views)[0];
-      if (best) featured = take(queue, used, (p) => p === best);
+    const picks = [];
+    for (const tier of tiers) {
+      let p = take(tier, types, used);
+      for (let attempt = 0; !p && types && attempt < 2; attempt++) {
+        await refill({ extraRandom: 2 });
+        p = take(tier, types, used);
+      }
+      // Famille introuvable pour l'instant : une carte d'une autre famille plutôt qu'un trou.
+      p ??= take(tier, null, used);
+      if (p) picks.push(p);
     }
-    picked.push(featured);
-    return picked.filter(Boolean);
+    return picks;
   }
 
   async function materialize(pages) {
-    const ids = pages.map((p) => p.pageId);
-    const existing = store.getCards(ids);
-    const missing = ids.filter((id) => !existing.has(id));
-    const details = missing.length ? await wiki.details(missing) : new Map();
-    const cards = [];
+    const ids = [...new Set(pages.map((p) => p.pageId))];
+    const byId = store.getCards(ids);
+    const missing = ids.filter((id) => !byId.has(id));
+    const chunks = [];
+    for (let i = 0; i < missing.length; i += DETAILS_CHUNK) chunks.push(missing.slice(i, i + DETAILS_CHUNK));
+    const details = new Map();
+    for (const part of await Promise.all(chunks.map((c) => wiki.details(c)))) for (const [k, v] of part) details.set(k, v);
     for (const p of pages) {
-      let card = existing.get(p.pageId);
-      if (!card) {
-        const d = details.get(p.pageId);
-        if (!d) continue;
-        card = buildCard({ ...d, pageId: p.pageId, length: d.length || p.length, views: p.views });
-        store.insertCard(card);
-      }
-      cards.push(card);
+      if (byId.has(p.pageId)) continue;
+      store.insertCard(buildCard({ ...p, ...(details.get(p.pageId) ?? {}) }));
+      byId.set(p.pageId, store.getCards([p.pageId]).get(p.pageId));
     }
-    return cards;
+    return byId;
   }
 
-  async function generatePack() {
-    const pages = await pickPages();
-    const cards = await materialize(pages);
+  // Ouvre `count` boosters d'un coup : renvoie, par booster, les cartes et leur éventuel Shiny.
+  async function generatePacks(theme = 'encyclopedie', count = 1) {
+    for (let attempt = 0; stock() < PACK_SIZE * 2 && attempt < 3; attempt++) await refill({ extraRandom: 1 });
+    if (stock() < PACK_SIZE) throw unavailable('Wikipédia ne répond pas, réessaie dans un instant.');
+
+    const picked = [];
+    for (let i = 0; i < count; i++) {
+      if (stock() < PACK_SIZE * 2) await refill({ extraRandom: 1 });
+      picked.push(await pickPack(theme));
+    }
+    const cards = await materialize(picked.flat());
     refill().catch(() => {});
-    if (cards.length < 3) throw Object.assign(new Error('Booster incomplet, réessaie.'), { status: 503 });
-    return cards;
+    const packs = picked
+      .map((pages) => pages.map((p) => ({ card: cards.get(p.pageId), shiny: rand() < SHINY_RATE })).filter((x) => x.card))
+      .filter((p) => p.length >= 3);
+    if (!packs.length) throw unavailable('Booster incomplet, réessaie.');
+    return packs;
   }
 
   async function warmUp() {
     await loadPool().catch((e) => log.warn?.(`[packs] ${e.message}`));
-    await refill();
+    await refill({ extraRandom: 1 });
   }
 
   return {
-    generatePack,
+    generatePacks,
     warmUp,
     loadPool,
     refill,
-    stats: () => ({ pool: pool.length, queue: queue.length, rare: buckets[2].length, epique: buckets[3].length, legendaire: buckets[4].length }),
+    stats: () => ({ pool: pool.length, buffers: buffers.map((b) => b.length) }),
   };
 }

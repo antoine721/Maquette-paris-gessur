@@ -14,7 +14,7 @@ import {
   sessionCookie,
   verifyPassword,
 } from './auth.js';
-import { RARITIES } from './cards.js';
+import { MAX_PACKS_PER_OPEN, PACKS, TYPES, publicRules } from './cards.js';
 import { createLive } from './live.js';
 
 const MIME = {
@@ -25,14 +25,18 @@ const MIME = {
   '.png': 'image/png',
   '.ico': 'image/x-icon',
   '.json': 'application/json; charset=utf-8',
+  '.woff2': 'font/woff2',
+  '.woff': 'font/woff',
+  '.webp': 'image/webp',
+  '.jpg': 'image/jpeg',
   '.webmanifest': 'application/manifest+json',
 };
 
 const CSP = [
   "default-src 'self'",
   "img-src 'self' data: https://upload.wikimedia.org",
-  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-  "font-src 'self' https://fonts.gstatic.com",
+  "style-src 'self' 'unsafe-inline'",
+  "font-src 'self' data:",
   "script-src 'self'",
   "connect-src 'self'",
   "frame-ancestors 'none'",
@@ -47,7 +51,7 @@ class HttpError extends Error {
   }
 }
 
-export function createApp({ db, packs, publicDir, inviteCode = '', wikiLang = 'fr', log = console }) {
+export function createApp({ db, packs, publicDir, inviteCode = '', wikiLang = 'fr', mockImage = null, log = console }) {
   const live = createLive();
   const limiter = createLoginLimiter();
   const opening = new Set();
@@ -100,7 +104,7 @@ export function createApp({ db, packs, publicDir, inviteCode = '', wikiLang = 'f
     appName: 'WikiPacks',
     inviteRequired: Boolean(inviteCode),
     wikiLang,
-    rarities: RARITIES.map(({ id, key, label, minViews, points }) => ({ id, key, label, minViews, points })),
+    rules: publicRules(),
   }), { auth: false });
 
   route('POST', '/api/register', async ({ req, res }) => {
@@ -121,7 +125,7 @@ export function createApp({ db, packs, publicDir, inviteCode = '', wikiLang = 'f
     startSession(req, res, user);
     const eventId = db.addEvent('join', user.id);
     live.broadcast('feed', db.feedSince(eventId - 1));
-    return { user: publicUser(user), stats: db.stats(user.id) };
+    return { user: publicUser(user), stats: db.stats(user.id), showcase: [] };
   }, { auth: false });
 
   route('POST', '/api/login', async ({ req, res }) => {
@@ -136,7 +140,7 @@ export function createApp({ db, packs, publicDir, inviteCode = '', wikiLang = 'f
     }
     limiter.reset(ip);
     startSession(req, res, user);
-    return { user: publicUser(user), stats: db.stats(user.id) };
+    return { user: publicUser(user), stats: db.stats(user.id), showcase: db.showcase(user.id) };
   }, { auth: false });
 
   route('POST', '/api/logout', ({ req, res, token }) => {
@@ -148,31 +152,36 @@ export function createApp({ db, packs, publicDir, inviteCode = '', wikiLang = 'f
   route('GET', '/api/me', ({ user }) => ({
     user: publicUser(user),
     stats: db.stats(user.id),
+    showcase: db.showcase(user.id),
     invite: inviteCode || null,
   }));
 
   // ---------- Boosters ----------
 
-  route('POST', '/api/packs/open', async ({ user }) => {
+  route('POST', '/api/packs/open', async ({ req, user }) => {
+    const body = await readJson(req);
+    const theme = PACKS.some((p) => p.key === body.theme) ? body.theme : PACKS[0].key;
+    const count = Math.min(Math.max(Math.trunc(Number(body.count) || 1), 1), MAX_PACKS_PER_OPEN);
     if (opening.has(user.id)) throw new HttpError(429, 'Un booster est déjà en cours d’ouverture.');
     opening.add(user.id);
     try {
-      const cards = await packs.generatePack();
+      const generated = await packs.generatePacks(theme, count);
       const before = db.lastEventId();
-      const pulled = db.recordPack(user.id, cards);
+      const opened = db.recordPacks(user.id, theme, generated);
       const events = db.feedSince(before);
       if (events.length) live.broadcast('feed', events);
-      return { cards: pulled, stats: db.stats(user.id) };
+      return { theme, packs: opened, stats: db.stats(user.id) };
     } finally {
       opening.delete(user.id);
     }
   });
 
-  // ---------- Collections et amis ----------
+  // ---------- Collections, catalogue et amis ----------
 
   route('GET', '/api/collection', ({ user }) => ({
     user: publicUser(user),
     stats: db.stats(user.id),
+    showcase: db.showcase(user.id),
     cards: db.collection(user.id),
   }));
 
@@ -185,7 +194,12 @@ export function createApp({ db, packs, publicDir, inviteCode = '', wikiLang = 'f
   route('GET', '/api/players/:name', ({ params }) => {
     const target = db.userByName(params.name);
     if (!target) throw new HttpError(404, 'Joueur introuvable.');
-    return { user: publicUser(target), stats: db.stats(target.id), cards: db.collection(target.id) };
+    return {
+      user: publicUser(target),
+      stats: db.stats(target.id),
+      showcase: db.showcase(target.id),
+      cards: db.collection(target.id),
+    };
   });
 
   route('GET', '/api/cards/:id', ({ user, params }) => {
@@ -194,20 +208,50 @@ export function createApp({ db, packs, publicDir, inviteCode = '', wikiLang = 'f
     return { card };
   });
 
+  route('GET', '/api/catalogue', ({ url, user }) => {
+    const p = url.searchParams;
+    const rarity = p.has('rarity') && p.get('rarity') !== '' ? Number(p.get('rarity')) : null;
+    const type = TYPES.some((t) => t.key === p.get('type')) ? p.get('type') : null;
+    const mine = p.get('mine') === '1' ? true : p.get('mine') === '0' ? false : null;
+    return db.catalogue({
+      q: String(p.get('q') ?? '').trim().slice(0, 80),
+      rarity: Number.isInteger(rarity) ? rarity : null,
+      type,
+      mine,
+      sort: p.get('sort') ?? 'rarity',
+      limit: Number(p.get('limit')) || 60,
+      offset: Number(p.get('offset')) || 0,
+      viewerId: user.id,
+    });
+  });
+
+  route('GET', '/api/search', ({ url }) => {
+    const text = String(url.searchParams.get('q') ?? '').trim().slice(0, 80);
+    return text ? db.search(text) : { cards: [], players: [] };
+  });
+
   route('GET', '/api/feed', ({ url }) => {
     const before = Number(url.searchParams.get('before')) || Number.MAX_SAFE_INTEGER;
     return { events: db.feed(30, before) };
   });
 
   route('POST', '/api/gift', async ({ req, user }) => {
-    const { to = '', pageId } = await readJson(req);
+    const { to = '', copyId } = await readJson(req);
     const target = db.userByName(String(to));
     if (!target) throw new HttpError(404, 'Joueur introuvable.');
     if (target.id === user.id) throw new HttpError(400, 'Tu ne peux pas t’offrir une carte à toi-même.');
-    const result = db.gift(user.id, target.id, Number(pageId));
-    if (!result) throw new HttpError(400, 'Tu n’as pas cette carte.');
+    const result = db.gift(user.id, target.id, Number(copyId));
+    if (!result) throw new HttpError(400, 'Cet exemplaire ne t’appartient pas.');
     live.broadcast('feed', db.feedSince(result.eventId - 1));
-    return { remaining: result.remaining, stats: db.stats(user.id) };
+    return { stats: db.stats(user.id), showcase: db.showcase(user.id) };
+  });
+
+  route('PUT', '/api/showcase', async ({ req, user }) => {
+    const { copyIds } = await readJson(req);
+    const ids = Array.isArray(copyIds) ? [...new Set(copyIds.map(Number).filter(Number.isInteger))] : null;
+    if (!ids || ids.length > 5) throw new HttpError(400, 'La vitrine contient 5 cartes au maximum.');
+    if (!db.setShowcase(user.id, ids)) throw new HttpError(400, 'Une de ces cartes ne t’appartient pas.');
+    return { showcase: db.showcase(user.id) };
   });
 
   route('GET', '/api/live', ({ req, res, user }) => {
@@ -218,7 +262,16 @@ export function createApp({ db, packs, publicDir, inviteCode = '', wikiLang = 'f
   // ---------- Fichiers statiques ----------
 
   function serveStatic(req, res, pathname) {
-    let rel = decodeURIComponent(pathname);
+    let rel;
+    try {
+      rel = decodeURIComponent(pathname);
+    } catch {
+      return send(res, 400, { error: 'Adresse invalide.' });
+    }
+    if (mockImage && rel.startsWith('/mock-img/')) {
+      res.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=86400' });
+      return res.end(mockImage(rel.slice('/mock-img/'.length)));
+    }
     if (rel === '/' || !extname(rel)) rel = '/index.html';
     const file = normalize(join(publicDir, rel));
     if (!file.startsWith(publicDir + sep)) return send(res, 403, { error: 'Interdit.' });
@@ -232,7 +285,8 @@ export function createApp({ db, packs, publicDir, inviteCode = '', wikiLang = 'f
     const etag = `"${stat.size.toString(36)}-${stat.mtimeMs.toString(36)}"`;
     const headers = {
       'Content-Type': MIME[extname(file)] ?? 'application/octet-stream',
-      'Cache-Control': 'no-cache',
+      // Les fichiers de /assets portent une empreinte dans leur nom : ils ne changent jamais.
+      'Cache-Control': rel.startsWith('/assets/') ? 'public, max-age=31536000, immutable' : 'no-cache',
       ETag: etag,
     };
     if (extname(file) === '.html') headers['Content-Security-Policy'] = CSP;

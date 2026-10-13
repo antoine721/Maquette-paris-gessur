@@ -1,10 +1,18 @@
 // Client minimal pour l'API de Wikipédia et les statistiques de Wikimedia.
-import { averageViews, rarityFromViews } from './cards.js';
+import { classifyType, cleanImage, rarityFromViews, views30From } from './cards.js';
 
+const THUMB = 800;
+const QUALITY = { 'Catégorie:Article de qualité': 'AdQ', 'Catégorie:Bon article': 'BA' };
+
+// Mesure d'un lot d'articles : popularité, image, description. Pas encore le texte.
 const MEASURE = {
-  prop: 'info|pageviews|pageprops',
-  ppprop: 'disambiguation',
+  prop: 'info|pageviews|pageprops|pageimages|description',
+  ppprop: 'disambiguation|wikibase_item',
   pvipdays: '30',
+  piprop: 'thumbnail',
+  pithumbsize: String(THUMB),
+  pilimit: '50',
+  pilicense: 'any',
 };
 
 export function createWiki({ lang = 'fr', fetchImpl = globalThis.fetch, userAgent, timeoutMs = 12000 } = {}) {
@@ -31,18 +39,36 @@ export function createWiki({ lang = 'fr', fetchImpl = globalThis.fetch, userAgen
     return getJson(url);
   }
 
-  // Popularité et longueur, sans le texte : sert à trier les candidats par rareté.
+  // Seuls les vrais articles illustrés deviennent des cartes.
   function parseMeasured(data) {
     const pages = data?.query?.pages ?? [];
-    return pages
-      .filter((p) => !p.missing && !p.invalid && p.ns === 0 && !(p.pageprops && 'disambiguation' in p.pageprops))
-      .map((p) => {
-        const views = averageViews(p.pageviews);
-        return { pageId: p.pageid, title: p.title, length: p.length ?? 0, views, rarity: rarityFromViews(views) };
+    const out = [];
+    for (const p of pages) {
+      if (p.missing || p.invalid || p.ns !== 0) continue;
+      if (p.pageprops && 'disambiguation' in p.pageprops) continue;
+      const image = cleanImage(p.thumbnail?.source);
+      if (!image) continue;
+      const { views30, daily } = views30From(p.pageviews);
+      const description = p.description ?? '';
+      out.push({
+        pageId: p.pageid,
+        title: p.title,
+        length: p.length ?? 0,
+        views30,
+        daily,
+        rarity: rarityFromViews(views30),
+        description,
+        type: classifyType(description, p.title),
+        image,
+        imageWidth: p.thumbnail?.width ?? null,
+        imageHeight: p.thumbnail?.height ?? null,
+        wikidata: p.pageprops?.wikibase_item ?? null,
       });
+    }
+    return out;
   }
 
-  async function randomMeasured(limit = 40) {
+  async function randomMeasured(limit = 50) {
     const data = await query({
       generator: 'random',
       grnnamespace: '0',
@@ -59,33 +85,28 @@ export function createWiki({ lang = 'fr', fetchImpl = globalThis.fetch, userAgen
     return parseMeasured(data);
   }
 
-  // Texte, image, description et nombre de langues des articles retenus.
+  // Texte d'introduction, nombre de langues et label de qualité des articles retenus.
   async function details(pageIds) {
     const result = new Map();
     if (!pageIds.length) return result;
     const data = await query({
       pageids: pageIds.join('|'),
-      prop: 'extracts|pageimages|description|langlinkscount|info',
+      prop: 'extracts|langlinkscount|categories',
       exintro: '1',
       explaintext: '1',
-      exsentences: '3',
+      exsentences: '4',
       exlimit: '20',
-      piprop: 'thumbnail',
-      pithumbsize: '640',
-      pilimit: '20',
-      pilicense: 'any',
+      clcategories: Object.keys(QUALITY).join('|'),
+      cllimit: 'max',
     });
     const langsKnown = !JSON.stringify(data?.warnings ?? '').includes('langlinkscount');
     for (const p of data?.query?.pages ?? []) {
       if (p.missing || p.invalid) continue;
+      const cat = (p.categories ?? []).map((c) => QUALITY[c.title]).find(Boolean) ?? null;
       result.set(p.pageid, {
-        pageId: p.pageid,
-        title: p.title,
-        length: p.length ?? 0,
-        description: p.description ?? '',
         extract: p.extract ?? '',
-        image: p.thumbnail?.source ?? null,
         langs: langsKnown ? (p.langlinkscount ?? 0) : null,
+        quality: cat,
       });
     }
     return result;

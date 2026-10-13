@@ -21,17 +21,15 @@ const USER_AGENT =
 mkdirSync(DATA_DIR, { recursive: true });
 const db = openDb(join(DATA_DIR, 'wikipacks.db'));
 
-const wiki = createWiki({
-  lang: WIKI_LANG,
-  userAgent: USER_AGENT,
-  fetchImpl: MOCK ? createMockFetch() : globalThis.fetch,
-});
+const mockFetch = MOCK ? createMockFetch() : null;
+const wiki = createWiki({ lang: WIKI_LANG, userAgent: USER_AGENT, fetchImpl: mockFetch ?? globalThis.fetch });
 const packs = createPackFactory({ wiki, store: db });
 
 const server = createApp({
   db,
   packs,
-  publicDir: join(root, 'public'),
+  publicDir: resolve(env.PUBLIC_DIR || join(root, 'dist')),
+  mockImage: mockFetch?.image ?? null,
   inviteCode: (env.INVITE_CODE || '').trim(),
   wikiLang: WIKI_LANG,
 });

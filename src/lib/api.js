@@ -7,7 +7,9 @@ export class ApiError extends Error {
 }
 
 let onUnauthorized = () => {};
-export const setUnauthorizedHandler = (fn) => (onUnauthorized = fn);
+export const setUnauthorizedHandler = (fn) => {
+  onUnauthorized = fn;
+};
 
 async function request(method, path, body) {
   let res;
@@ -23,11 +25,18 @@ async function request(method, path, body) {
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    if (res.status === 401 && path !== '/api/login') onUnauthorized();
+    if (res.status === 401 && path !== '/api/login' && path !== '/api/me') onUnauthorized();
     throw new ApiError(res.status, data.error || `Erreur ${res.status}`);
   }
   return data;
 }
+
+const qs = (params) => {
+  const u = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== '') u.set(k, v);
+  const s = u.toString();
+  return s ? `?${s}` : '';
+};
 
 export const api = {
   config: () => request('GET', '/api/config'),
@@ -35,11 +44,14 @@ export const api = {
   login: (username, password) => request('POST', '/api/login', { username, password }),
   register: (username, password, invite) => request('POST', '/api/register', { username, password, invite }),
   logout: () => request('POST', '/api/logout'),
-  openPack: () => request('POST', '/api/packs/open'),
+  openPacks: (theme, count = 1) => request('POST', '/api/packs/open', { theme, count }),
   collection: () => request('GET', '/api/collection'),
   players: () => request('GET', '/api/players'),
   player: (name) => request('GET', `/api/players/${encodeURIComponent(name)}`),
   card: (id) => request('GET', `/api/cards/${encodeURIComponent(id)}`),
+  catalogue: (params) => request('GET', `/api/catalogue${qs(params)}`),
+  search: (q) => request('GET', `/api/search${qs({ q })}`),
   feed: () => request('GET', '/api/feed'),
-  gift: (to, pageId) => request('POST', '/api/gift', { to, pageId }),
+  gift: (to, copyId) => request('POST', '/api/gift', { to, copyId }),
+  setShowcase: (copyIds) => request('PUT', '/api/showcase', { copyIds }),
 };
