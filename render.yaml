@@ -1,0 +1,17 @@
+# Déploiement sur Render (offre gratuite) : New → Blueprint → ce dépôt.
+# L'offre gratuite n'a pas de disque permanent : la base est remise à zéro à chaque redémarrage,
+# donc l'indexation complète de Wikipédia est coupée (les boosters sont tirés directement dans Wikipédia).
+services:
+  - type: web
+    name: wikipacks
+    runtime: node
+    plan: free
+    branch: claude/charming-bell-hobd3z
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/config
+    envVars:
+      - key: NODE_VERSION
+        value: 22.14.0
+      - key: WIKI_INDEX
+        value: "0"

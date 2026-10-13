@@ -82,7 +82,14 @@ npm run index      # indexer tout Wikipédia sans lancer le site
 
 Le serveur garde les comptes et les collections dans un fichier SQLite : il faut un hébergeur avec un **disque persistant**.
 
-**Railway** (le plus simple) :
+**Render, gratuit** (pour essayer) : le fichier [`render.yaml`](render.yaml) configure tout.
+1. Crée un compte sur [render.com](https://render.com) avec ton compte GitHub.
+2. **New → Blueprint**, choisis ce dépôt (autorise l'accès à Render si GitHub le demande), puis **Apply**.
+3. Attends la fin du premier déploiement (quelques minutes) : le lien `https://wikipacks-xxxx.onrender.com` s'affiche en haut du service.
+
+Limites de l'offre gratuite : le site s'endort après 15 minutes sans visite (premier chargement d'environ une minute ensuite) et, sans disque permanent, **les comptes et les collections sont effacés à chaque redémarrage ou mise à jour**. L'indexation complète de Wikipédia y est donc coupée. Pour garder les données, passe le service sur une offre payante avec un disque monté sur `/data` (`DATA_DIR=/data`), ou utilise Railway.
+
+**Railway** (données conservées) :
 1. Nouveau projet depuis ce dépôt GitHub. Railway détecte Node, lance `npm run build` puis `npm start`.
 2. Ajoute un **Volume** monté sur `/data`.
 3. Variables : `DATA_DIR=/data`, et `INVITE_CODE=un-code-secret` pour que seuls tes amis puissent s'inscrire.
