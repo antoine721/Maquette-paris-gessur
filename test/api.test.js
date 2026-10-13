@@ -97,9 +97,27 @@ test('connexion, déconnexion et routes protégées', async () => {
   assert.equal((await c('GET', '/api/collection')).status, 401);
 });
 
-test('une requête non JSON est refusée', async () => {
+test('écritures : JSON strict et même origine', async () => {
   const res = await fetch(`${base}/api/login`, { method: 'POST', body: 'username=a&password=b' });
   assert.equal(res.status, 415);
+  const sneaky = await fetch(`${base}/api/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain; x=application/json' },
+    body: JSON.stringify({ username: 'Antoine', password: 'secret1' }),
+  });
+  assert.equal(sneaky.status, 415);
+  const foreign = await fetch(`${base}/api/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: 'http://evil.example' },
+    body: JSON.stringify({ username: 'Antoine', password: 'secret1' }),
+  });
+  assert.equal(foreign.status, 403);
+  const same = await fetch(`${base}/api/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: base },
+    body: JSON.stringify({ username: 'Antoine', password: 'secret1' }),
+  });
+  assert.equal(same.status, 200);
 });
 
 test('boosters sans limite : exemplaires numérotés et collection regroupée', async () => {

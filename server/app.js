@@ -71,9 +71,20 @@ export function createApp({ db, packs, publicDir, inviteCode = '', wikiLang = 'f
     res.end(data);
   }
 
+  // Écritures : JSON strict et même origine que le site (en plus du cookie SameSite=Lax).
   async function readJson(req) {
-    if (!String(req.headers['content-type'] ?? '').includes('application/json')) {
-      throw new HttpError(415, 'Requête JSON attendue.');
+    const type = String(req.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase();
+    if (type !== 'application/json') throw new HttpError(415, 'Requête JSON attendue.');
+    const origin = req.headers.origin;
+    if (origin) {
+      let host = null;
+      try {
+        host = new URL(origin).host;
+      } catch {
+        host = null;
+      }
+      const expected = String(req.headers['x-forwarded-host'] ?? req.headers.host ?? '').split(',')[0].trim();
+      if (host !== expected) throw new HttpError(403, 'Origine refusée.');
     }
     let size = 0;
     const chunks = [];

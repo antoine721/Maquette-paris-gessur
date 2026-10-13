@@ -13,6 +13,8 @@ ENV NODE_ENV=production PORT=3000 DATA_DIR=/data
 COPY package.json ./
 COPY server ./server
 COPY --from=build /app/dist ./dist
+RUN mkdir -p /data && chown node:node /data
+USER node
 VOLUME /data
 EXPOSE 3000
 CMD ["node", "--no-warnings=ExperimentalWarning", "server/index.js"]
