@@ -1,21 +1,20 @@
-# Guessr Group — maquette de landing page (V2)
+# Guessr Group — maquette de landing page (V3)
 
-Proposition de refonte de [parisguessr.com](https://parisguessr.com) : ParisGuessr devient **Guessr Group**, une famille de jeux de métro déclinée dans 18 villes de 12 pays européens.
+Proposition de refonte de [parisguessr.com](https://parisguessr.com) : ParisGuessr devient **Guessr Group**, un jeu de métro par ville, dans 18 villes de 12 pays européens.
 
-Ouvrir `index.html` dans un navigateur (fichier autonome, seule dépendance externe : Google Fonts).
+Ouvrir `index.html` dans un navigateur (fichier autonome, seule dépendance externe : la police Inter sur Google Fonts ; sur Mac et iPhone, la page utilise SF Pro).
 
 ## Direction artistique
 
-Le métro la nuit : un seul univers sombre, des lignes lumineuses aux vraies couleurs des réseaux, une typo display à caractère (Funnel Display) et un texte sobre (Geist).
+Page produit claire et épurée, dans l'esprit d'Apple : fond blanc et gris très clair, grande typographie, ombres douces. Le jeu est le héros : il apparaît dans de vrais écrans d'iPhone. La couleur vient uniquement des lignes de métro.
 
 ## Sections
 
-- **Hero animé** : un plan vivant de l'Europe. Chaque ville s'allume avec son réseau dans les couleurs officielles de ses lignes, des rames circulent, des impulsions partent de Paris. Le titre change de langue (FR, EN, DE, ES, IT).
-- **Bandeau** : 18 vraies stations, une par ville, avec la couleur de leur ligne.
-- **Démo jouable de Trios** dans 5 villes (Paris ligne 1, London Central, Berlin U8, Madrid línea 1, Milano M2), avec score et états par ville.
-- **Affiches de villes** : un jeu par ville (ParisGuessr, LondonGuessr…), affiche générée à partir des couleurs de ligne.
-- **Les 7 jeux** en grille, chacun avec un aperçu de son interface (exemples réels du réseau parisien).
-- **Plan de lancement** : En ligne, Vague 1, Vague 2, Vague 3.
-- **Liste d'attente** par ville (formulaire non branché dans la maquette).
+- **Hero** : « Le métro de 18 villes. Dans ta poche. » avec trois iPhone montrant Trios (Paris), Metrodle (Paris) et Hubs (Londres).
+- **Le groupe** : un jeu par ville (ParisGuessr, LondonGuessr, BerlinGuessr…).
+- **Ta ville. Tes lignes.** : sélecteur de ville et iPhone jouable (Trios à Paris, Londres, Berlin, Madrid, Milan).
+- **Sept jeux** : grille avec aperçu de chaque jeu (exemples réels du réseau parisien).
+- **18 villes. 12 pays.** : carrousel des villes avec les vraies couleurs de leurs lignes, filtrable par vague de lancement.
+- **Être prévenu** : liste d'attente par ville (formulaire non branché dans la maquette).
 
-Responsive jusqu'à 360 px, `prefers-reduced-motion` respecté, animations en pause hors écran.
+Responsive jusqu'à 360 px, `prefers-reduced-motion` respecté.
