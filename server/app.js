@@ -1,0 +1,287 @@
+// Serveur HTTP : API JSON, flux en direct et fichiers statiques.
+import { createReadStream, statSync } from 'node:fs';
+import { createServer } from 'node:http';
+import { extname, join, normalize, sep } from 'node:path';
+import {
+  PASSWORD_MIN,
+  SESSION_DAYS,
+  USERNAME_RE,
+  createLoginLimiter,
+  hashPassword,
+  hashToken,
+  newToken,
+  parseCookies,
+  sessionCookie,
+  verifyPassword,
+} from './auth.js';
+import { RARITIES } from './cards.js';
+import { createLive } from './live.js';
+
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.ico': 'image/x-icon',
+  '.json': 'application/json; charset=utf-8',
+  '.webmanifest': 'application/manifest+json',
+};
+
+const CSP = [
+  "default-src 'self'",
+  "img-src 'self' data: https://upload.wikimedia.org",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "font-src 'self' https://fonts.gstatic.com",
+  "script-src 'self'",
+  "connect-src 'self'",
+  "frame-ancestors 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+].join('; ');
+
+class HttpError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
+}
+
+export function createApp({ db, packs, publicDir, inviteCode = '', wikiLang = 'fr', log = console }) {
+  const live = createLive();
+  const limiter = createLoginLimiter();
+  const opening = new Set();
+  const routes = [];
+  const route = (method, path, handler, { auth = true } = {}) => {
+    const keys = [];
+    const re = new RegExp(`^${path.replace(/:(\w+)/g, (_, k) => (keys.push(k), '([^/]+)'))}$`);
+    routes.push({ method, re, keys, handler, auth });
+  };
+
+  const isSecure = (req) => req.headers['x-forwarded-proto'] === 'https' || req.socket.encrypted;
+  const clientIp = (req) => String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim() || req.socket.remoteAddress;
+
+  function send(res, status, body, headers = {}) {
+    const data = body === undefined ? '' : JSON.stringify(body);
+    res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...headers });
+    res.end(data);
+  }
+
+  async function readJson(req) {
+    if (!String(req.headers['content-type'] ?? '').includes('application/json')) {
+      throw new HttpError(415, 'Requête JSON attendue.');
+    }
+    let size = 0;
+    const chunks = [];
+    for await (const chunk of req) {
+      size += chunk.length;
+      if (size > 16 * 1024) throw new HttpError(413, 'Requête trop lourde.');
+      chunks.push(chunk);
+    }
+    try {
+      return chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {};
+    } catch {
+      throw new HttpError(400, 'JSON invalide.');
+    }
+  }
+
+  function startSession(req, res, user) {
+    const token = newToken();
+    const maxAgeSec = SESSION_DAYS * 24 * 3600;
+    db.createSession(hashToken(token), user.id, Date.now() + maxAgeSec * 1000);
+    res.setHeader('Set-Cookie', sessionCookie(token, { secure: isSecure(req), maxAgeSec }));
+  }
+
+  const publicUser = (u) => ({ username: u.username, joinedAt: u.created_at });
+
+  // ---------- Comptes ----------
+
+  route('GET', '/api/config', () => ({
+    appName: 'WikiPacks',
+    inviteRequired: Boolean(inviteCode),
+    wikiLang,
+    rarities: RARITIES.map(({ id, key, label, minViews, points }) => ({ id, key, label, minViews, points })),
+  }), { auth: false });
+
+  route('POST', '/api/register', async ({ req, res }) => {
+    const { username = '', password = '', invite = '' } = await readJson(req);
+    const name = String(username).trim();
+    if (!USERNAME_RE.test(name)) throw new HttpError(400, 'Pseudo : 3 à 20 caractères (lettres, chiffres, . _ -).');
+    if (String(password).length < PASSWORD_MIN) throw new HttpError(400, `Mot de passe : ${PASSWORD_MIN} caractères minimum.`);
+    if (String(password).length > 200) throw new HttpError(400, 'Mot de passe trop long.');
+    if (inviteCode && String(invite).trim() !== inviteCode) throw new HttpError(403, "Code d'invitation incorrect.");
+    if (db.userByName(name)) throw new HttpError(409, 'Ce pseudo est déjà pris.');
+    let user;
+    try {
+      user = db.createUser(name, await hashPassword(String(password)));
+    } catch (e) {
+      if (String(e.message).includes('UNIQUE')) throw new HttpError(409, 'Ce pseudo est déjà pris.');
+      throw e;
+    }
+    startSession(req, res, user);
+    const eventId = db.addEvent('join', user.id);
+    live.broadcast('feed', db.feedSince(eventId - 1));
+    return { user: publicUser(user), stats: db.stats(user.id) };
+  }, { auth: false });
+
+  route('POST', '/api/login', async ({ req, res }) => {
+    const { username = '', password = '' } = await readJson(req);
+    const ip = clientIp(req);
+    if (limiter.blocked(ip)) throw new HttpError(429, 'Trop d’essais. Réessaie dans quelques minutes.');
+    const user = db.userByName(String(username).trim());
+    const ok = user && (await verifyPassword(String(password), user.password_hash));
+    if (!ok) {
+      limiter.fail(ip);
+      throw new HttpError(401, 'Pseudo ou mot de passe incorrect.');
+    }
+    limiter.reset(ip);
+    startSession(req, res, user);
+    return { user: publicUser(user), stats: db.stats(user.id) };
+  }, { auth: false });
+
+  route('POST', '/api/logout', ({ req, res, token }) => {
+    if (token) db.deleteSession(hashToken(token));
+    res.setHeader('Set-Cookie', sessionCookie('', { secure: isSecure(req), maxAgeSec: 0 }));
+    return { ok: true };
+  }, { auth: false });
+
+  route('GET', '/api/me', ({ user }) => ({
+    user: publicUser(user),
+    stats: db.stats(user.id),
+    invite: inviteCode || null,
+  }));
+
+  // ---------- Boosters ----------
+
+  route('POST', '/api/packs/open', async ({ user }) => {
+    if (opening.has(user.id)) throw new HttpError(429, 'Un booster est déjà en cours d’ouverture.');
+    opening.add(user.id);
+    try {
+      const cards = await packs.generatePack();
+      const before = db.lastEventId();
+      const pulled = db.recordPack(user.id, cards);
+      const events = db.feedSince(before);
+      if (events.length) live.broadcast('feed', events);
+      return { cards: pulled, stats: db.stats(user.id) };
+    } finally {
+      opening.delete(user.id);
+    }
+  });
+
+  // ---------- Collections et amis ----------
+
+  route('GET', '/api/collection', ({ user }) => ({
+    user: publicUser(user),
+    stats: db.stats(user.id),
+    cards: db.collection(user.id),
+  }));
+
+  route('GET', '/api/players', ({ user }) => ({
+    me: user.username,
+    online: live.online(),
+    players: db.players(),
+  }));
+
+  route('GET', '/api/players/:name', ({ params }) => {
+    const target = db.userByName(params.name);
+    if (!target) throw new HttpError(404, 'Joueur introuvable.');
+    return { user: publicUser(target), stats: db.stats(target.id), cards: db.collection(target.id) };
+  });
+
+  route('GET', '/api/cards/:id', ({ user, params }) => {
+    const card = db.card(Number(params.id), user.id);
+    if (!card) throw new HttpError(404, 'Carte introuvable.');
+    return { card };
+  });
+
+  route('GET', '/api/feed', ({ url }) => {
+    const before = Number(url.searchParams.get('before')) || Number.MAX_SAFE_INTEGER;
+    return { events: db.feed(30, before) };
+  });
+
+  route('POST', '/api/gift', async ({ req, user }) => {
+    const { to = '', pageId } = await readJson(req);
+    const target = db.userByName(String(to));
+    if (!target) throw new HttpError(404, 'Joueur introuvable.');
+    if (target.id === user.id) throw new HttpError(400, 'Tu ne peux pas t’offrir une carte à toi-même.');
+    const result = db.gift(user.id, target.id, Number(pageId));
+    if (!result) throw new HttpError(400, 'Tu n’as pas cette carte.');
+    live.broadcast('feed', db.feedSince(result.eventId - 1));
+    return { remaining: result.remaining, stats: db.stats(user.id) };
+  });
+
+  route('GET', '/api/live', ({ req, res, user }) => {
+    live.connect(req, res, user);
+    return undefined;
+  });
+
+  // ---------- Fichiers statiques ----------
+
+  function serveStatic(req, res, pathname) {
+    let rel = decodeURIComponent(pathname);
+    if (rel === '/' || !extname(rel)) rel = '/index.html';
+    const file = normalize(join(publicDir, rel));
+    if (!file.startsWith(publicDir + sep)) return send(res, 403, { error: 'Interdit.' });
+    let stat;
+    try {
+      stat = statSync(file);
+      if (!stat.isFile()) throw new Error();
+    } catch {
+      return send(res, 404, { error: 'Introuvable.' });
+    }
+    const etag = `"${stat.size.toString(36)}-${stat.mtimeMs.toString(36)}"`;
+    const headers = {
+      'Content-Type': MIME[extname(file)] ?? 'application/octet-stream',
+      'Cache-Control': 'no-cache',
+      ETag: etag,
+    };
+    if (extname(file) === '.html') headers['Content-Security-Policy'] = CSP;
+    if (req.headers['if-none-match'] === etag) {
+      res.writeHead(304, headers);
+      return res.end();
+    }
+    res.writeHead(200, { ...headers, 'Content-Length': stat.size });
+    if (req.method === 'HEAD') return res.end();
+    createReadStream(file).pipe(res);
+  }
+
+  // ---------- Aiguillage ----------
+
+  async function handle(req, res) {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Referrer-Policy', 'same-origin');
+    const url = new URL(req.url, 'http://localhost');
+    if (!url.pathname.startsWith('/api/')) {
+      if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, { error: 'Méthode non permise.' });
+      return serveStatic(req, res, url.pathname);
+    }
+    const found = routes.find((r) => r.method === req.method && r.re.test(url.pathname));
+    if (!found) return send(res, 404, { error: 'Route inconnue.' });
+    const m = url.pathname.match(found.re);
+    const params = Object.fromEntries(found.keys.map((k, i) => [k, decodeURIComponent(m[i + 1])]));
+    const token = parseCookies(req.headers.cookie).sid || null;
+    const user = token ? db.sessionUser(hashToken(token)) : null;
+    if (found.auth && !user) return send(res, 401, { error: 'Connecte-toi pour continuer.' });
+    const body = await found.handler({ req, res, url, params, user, token });
+    if (body !== undefined && !res.headersSent) send(res, 200, body);
+  }
+
+  const server = createServer((req, res) => {
+    handle(req, res).catch((err) => {
+      const status = err.status ?? 500;
+      if (!err.status) log.error?.(`[http] ${req.method} ${req.url} → ${err.stack ?? err}`);
+      else if (status >= 500) log.warn?.(`[http] ${req.method} ${req.url} → ${err.message}`);
+      if (!res.headersSent) send(res, status, { error: status >= 500 && !err.status ? 'Erreur du serveur.' : err.message });
+      else res.end();
+    });
+  });
+
+  const purge = setInterval(() => db.purgeSessions(), 6 * 3600 * 1000);
+  purge.unref();
+  server.on('close', () => {
+    clearInterval(purge);
+    live.close();
+  });
+
+  return server;
+}

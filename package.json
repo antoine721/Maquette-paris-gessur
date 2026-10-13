@@ -1,0 +1,16 @@
+{
+  "name": "wikipacks",
+  "version": "1.0.0",
+  "description": "Ouvre des boosters de cartes Wikipédia avec tes amis, sans limite.",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node --no-warnings=ExperimentalWarning server/index.js",
+    "dev": "WIKI_MOCK=1 DATA_DIR=./data-dev node --no-warnings=ExperimentalWarning --watch server/index.js",
+    "test": "node --no-warnings=ExperimentalWarning --test \"test/*.test.js\""
+  },
+  "license": "MIT"
+}
