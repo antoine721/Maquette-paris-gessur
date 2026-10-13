@@ -89,8 +89,10 @@ export default function CardPage() {
   const showcaseIds = showcase.map((s) => s.copyId);
   const nextRarity = rules.rarities[card.rarity + 1];
 
+  // Une carte n'apparaît qu'une fois en vitrine : épingler un exemplaire remplace un autre exemplaire de la même carte.
   const toggleShowcase = async (copyId) => {
-    const ids = showcaseIds.includes(copyId) ? showcaseIds.filter((x) => x !== copyId) : [...showcaseIds, copyId];
+    const others = showcase.filter((s) => s.pageId !== card.pageId).map((s) => s.copyId);
+    const ids = showcaseIds.includes(copyId) ? showcaseIds.filter((x) => x !== copyId) : [...others, copyId];
     if (ids.length > 5) {
       toast.push('Ta vitrine est pleine : retire d’abord une carte (5 au maximum).', { kind: 'error' });
       return;
@@ -179,7 +181,7 @@ export default function CardPage() {
               <Fact label="Vues 30 j" value={fmt(card.views30)} sub={nextRarity ? `${fmt(nextRarity.min)} pour ${nextRarity.label}` : 'Rareté maximale'} />
               <Fact label="En circulation" value={fmt(card.totalCopies)} sub={`exemplaire${card.totalCopies > 1 ? 's' : ''} dans le groupe`} />
               <Fact label="Longueur" value={fmtBytes(card.length)} sub="de texte" />
-              <Fact label="Langues" value={card.langs == null ? '?' : fmt(card.langs)} sub="éditions de Wikipédia" />
+              <Fact label="Langues" value={card.langs == null ? '?' : fmt(card.langs)} sub={card.langs === 1 ? 'édition de Wikipédia' : 'éditions de Wikipédia'} />
               <Fact label="Découverte" value={new Date(card.discoveredAt).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })} sub={new Date(card.discoveredAt).getFullYear()} />
               <Fact label="Numéro" value={`n° ${card.pageId}`} sub={card.wikidata ?? 'page Wikipédia'} />
             </div>
@@ -189,12 +191,12 @@ export default function CardPage() {
             className="mt-5"
             title={
               <span className="inline-flex items-center gap-1.5">
-                Vues des 30 derniers jours
-                <InfoTip>La rareté a été fixée au premier tirage, selon les vues de l’article sur 30 jours. Elle ne change plus ensuite, même si l’article devient plus ou moins lu.</InfoTip>
+                Vues sur 30 jours
+                <InfoTip>Relevées le jour où la carte a été découverte : elles ont fixé sa rareté, qui ne change plus ensuite, même si l’article devient plus ou moins lu.</InfoTip>
               </span>
             }
           >
-            <ViewsChart daily={card.daily} color={r.color} />
+            <ViewsChart daily={card.daily} color={r.color} endAt={card.discoveredAt} />
           </Panel>
 
           <div className="mt-5 grid gap-5 md:grid-cols-2">

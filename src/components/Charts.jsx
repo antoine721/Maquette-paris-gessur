@@ -8,8 +8,9 @@ import { Pips, RARITY } from '../lib/visuals.jsx';
 const H = 170;
 const PAD = { top: 14, right: 12, bottom: 24, left: 40 };
 
-function dayLabel(offsetFromEnd) {
-  const d = new Date(Date.now() - (offsetFromEnd + 1) * 86400000);
+// Les vues ont été relevées au premier tirage : le dernier point est la veille de la découverte.
+function dayLabel(endAt, offsetFromEnd) {
+  const d = new Date(endAt - (offsetFromEnd + 1) * 86400000);
   return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
 }
 
@@ -19,7 +20,7 @@ function niceMax(v) {
   return Math.ceil(v / p) * p;
 }
 
-export function ViewsChart({ daily, color }) {
+export function ViewsChart({ daily, color, endAt = Date.now() }) {
   const id = useId();
   const [hover, setHover] = useState(null);
   // Le dessin prend la largeur réelle : les textes gardent leur taille, même sur mobile.
@@ -46,7 +47,7 @@ export function ViewsChart({ daily, color }) {
   const line = known.map((p, k) => `${k ? 'L' : 'M'}${x(p.i).toFixed(1)},${y(p.v).toFixed(1)}`).join(' ');
   const area = `${line} L${x(known.at(-1).i).toFixed(1)},${PAD.top + ih} L${x(known[0].i).toFixed(1)},${PAD.top + ih} Z`;
   const ticks = [0, max / 2, max];
-  const label = (i) => dayLabel(n - 1 - i);
+  const label = (i) => dayLabel(endAt, n - 1 - i);
   const h = hover != null ? points[hover] : null;
 
   const pick = (clientX, rect) => {

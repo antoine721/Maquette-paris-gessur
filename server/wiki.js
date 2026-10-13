@@ -1,5 +1,5 @@
 // Client minimal pour l'API de Wikipédia et les statistiques de Wikimedia.
-import { classifyType, cleanImage, rarityFromViews, views30From } from './cards.js';
+import { classifyType, cleanDescription, cleanImage, rarityFromViews, views30From } from './cards.js';
 
 const THUMB = 800;
 const QUALITY = { 'Catégorie:Article de qualité': 'AdQ', 'Catégorie:Bon article': 'BA' };
@@ -49,7 +49,7 @@ export function createWiki({ lang = 'fr', fetchImpl = globalThis.fetch, userAgen
       const image = cleanImage(p.thumbnail?.source);
       if (!image) continue;
       const { views30, daily } = views30From(p.pageviews);
-      const description = p.description ?? '';
+      const description = cleanDescription(p.description ?? '');
       out.push({
         pageId: p.pageid,
         title: p.title,

@@ -42,18 +42,20 @@ function Showcase({ items, own, onEdit }) {
 
 function ShowcaseEditor({ open, cards, current, onClose, onSaved }) {
   const toast = useToast();
+  // Sélection par carte ; un exemplaire déjà épinglé (depuis sa fiche) est gardé tel quel.
   const [picked, setPicked] = useState([]);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
-    if (open) setPicked(current.map((s) => s.copyId));
+    if (open) setPicked([...new Set(current.map((s) => s.pageId))]);
   }, [open, current]);
+  const copyFor = (pageId) => current.find((s) => s.pageId === pageId)?.copyId ?? cards.find((c) => c.pageId === pageId)?.bestCopyId;
   const sorted = useMemo(() => [...cards].sort((a, b) => b.rarity - a.rarity || Number(b.shiny) - Number(a.shiny) || b.views30 - a.views30), [cards]);
-  const toggle = (copyId) =>
-    setPicked((p) => (p.includes(copyId) ? p.filter((x) => x !== copyId) : p.length >= 5 ? p : [...p, copyId]));
+  const toggle = (pageId) =>
+    setPicked((p) => (p.includes(pageId) ? p.filter((x) => x !== pageId) : p.length >= 5 ? p : [...p, pageId]));
   const save = async () => {
     setBusy(true);
     try {
-      const res = await api.setShowcase(picked);
+      const res = await api.setShowcase(picked.map(copyFor).filter(Boolean));
       onSaved(res.showcase);
       toast.push('Vitrine mise à jour.');
     } catch (e) {
@@ -67,9 +69,9 @@ function ShowcaseEditor({ open, cards, current, onClose, onSaved }) {
       <p className="mt-1 text-[14px] text-muted">Choisis jusqu’à 5 cartes à montrer sur ton profil, dans l’ordre où tu les touches.</p>
       <div className="mt-5 grid max-h-[58vh] grid-cols-3 gap-3 overflow-y-auto p-1 sm:grid-cols-5 lg:grid-cols-6">
         {sorted.map((c) => {
-          const n = picked.indexOf(c.bestCopyId);
+          const n = picked.indexOf(c.pageId);
           return (
-            <button key={c.pageId} type="button" onClick={() => toggle(c.bestCopyId)} aria-pressed={n >= 0} className="relative rounded-[12px] text-left">
+            <button key={c.pageId} type="button" onClick={() => toggle(c.pageId)} aria-pressed={n >= 0} className="relative rounded-[12px] text-left">
               {n >= 0 ? (
                 <span className="absolute -top-2 -right-2 z-10 grid h-7 w-7 place-items-center rounded-full bg-gold text-[13px] font-extrabold text-[#1d1400] shadow-lg">{n + 1}</span>
               ) : null}

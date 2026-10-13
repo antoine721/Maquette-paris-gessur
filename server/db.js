@@ -146,13 +146,14 @@ export function copyView(card, { copyId, serial, shiny }) {
   return { ...card, ...stats, copyId, serial, shiny: Boolean(shiny) };
 }
 
+// Chaque tri finit par page_id pour un ordre stable d'une page de résultats à l'autre.
 const SORTS = {
-  rarity: 'c.rarity DESC, c.views30 DESC',
-  recent: 'c.created_at DESC',
-  views: 'c.views30 DESC',
-  atk: 'MAX(c.atk, c.def) DESC',
-  alpha: 'c.title COLLATE NOCASE ASC',
-  copies: 'copies DESC, c.rarity DESC',
+  rarity: 'c.rarity DESC, c.views30 DESC, c.page_id',
+  recent: 'c.created_at DESC, c.page_id DESC',
+  views: 'c.views30 DESC, c.page_id',
+  atk: 'MAX(c.atk, c.def) DESC, c.page_id',
+  alpha: 'c.title COLLATE NOCASE ASC, c.page_id',
+  copies: 'copies DESC, c.rarity DESC, c.page_id',
 };
 
 export function openDb(file) {
@@ -398,9 +399,10 @@ export function openDb(file) {
         FROM cards c`;
       const wrapped = `SELECT * FROM (${base}) c ${filter}`;
       const total = db.prepare(`SELECT COUNT(*) AS n FROM (${wrapped})`).get(viewerId, ...params).n;
-      const rows = db
-        .prepare(`${wrapped} ORDER BY ${SORTS[sort] ?? SORTS.rarity} LIMIT ? OFFSET ?`)
-        .all(viewerId, ...params, Math.min(limit, 120), Math.max(offset, 0));
+      const order = Object.hasOwn(SORTS, sort) ? SORTS[sort] : SORTS.rarity;
+      const lim = Math.min(Math.max(Math.trunc(Number(limit)) || 60, 1), 120);
+      const off = Math.max(Math.trunc(Number(offset)) || 0, 0);
+      const rows = db.prepare(`${wrapped} ORDER BY ${order} LIMIT ? OFFSET ?`).all(viewerId, ...params, lim, off);
       return {
         total,
         cards: rows.map((r) => ({ ...toCard(r), copies: r.copies, owners: r.owners, mine: r.mine })),

@@ -8,7 +8,7 @@ import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { PackArt } from '../components/PackArt.jsx';
 import { Aura, WikiCard } from '../components/WikiCard.jsx';
-import { Button, Kbd, RarityTag, TypeTag } from '../components/ui.jsx';
+import { Button, Kbd, RarityTag, TypeTag, useScrollLock } from '../components/ui.jsx';
 import { api } from '../lib/api.js';
 import { burstFor, celebrate, reducedMotion } from '../lib/fx.js';
 import { useSession } from '../lib/session.jsx';
@@ -18,6 +18,9 @@ import { RARITY } from '../lib/visuals.jsx';
 const CARD_W = 'min(300px, 72vw, calc((100dvh - 270px) * 0.716))';
 const CUT_THRESHOLD = 0.62;
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Espace et Entrée pilotent l'ouverture, sauf quand le focus est sur un contrôle (bouton, champ…).
+const onControl = (e) => Boolean(e.target.closest?.('button, a, input, textarea, select, [contenteditable="true"]'));
 
 // Plus une carte est rare, plus elle arrive tard (un Shiny compte comme une demi-rareté de plus).
 const weight = (c) => c.rarity + (c.shiny ? 0.5 : 0);
@@ -110,7 +113,7 @@ function PackStage({ pack, count, torn, leaving, onStart, onCut }) {
 
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key === ' ' || e.key === 'Enter') {
+      if ((e.key === ' ' || e.key === 'Enter') && !onControl(e)) {
         e.preventDefault();
         auto();
       }
@@ -268,6 +271,8 @@ function RevealStage({ cards, onDone, setMood }) {
   const [dir, setDir] = useState(-1);
   const [banner, setBanner] = useState(null);
   const [entering, setEntering] = useState(true);
+  // Tant que la révélation joue (effets compris), la carte ne peut pas être jetée.
+  const busy = useRef(false);
 
   useEffect(() => {
     const t = setTimeout(() => setEntering(false), 900);
@@ -278,6 +283,7 @@ function RevealStage({ cards, onDone, setMood }) {
     async (el, animate) => {
       const card = cards[current];
       const big = isBig(card);
+      busy.current = true;
       if (big && !reducedMotion()) {
         sfx.tease(card.rarity);
         setMood({ dim: true, color: card.shiny ? '#c39bff' : RARITY[card.rarity].color });
@@ -298,13 +304,14 @@ function RevealStage({ cards, onDone, setMood }) {
       if (card.rarity >= 3 || card.shiny) setBanner(card);
       setMood({ dim: false, flash: big, rays: card.rarity >= 3 || card.shiny, color: card.shiny ? '#c39bff' : RARITY[card.rarity].color });
       animate(el, { scale: [big ? 1.1 : 1.04, 1] }, { type: 'spring', stiffness: 260, damping: 14 });
+      busy.current = false;
     },
     [cards, current, setMood],
   );
 
   const next = useCallback(
     (direction) => {
-      if (!revealed[current]) return;
+      if (!revealed[current] || busy.current) return;
       sfx.whoosh();
       setDir(direction);
       setBanner(null);
@@ -324,6 +331,7 @@ function RevealStage({ cards, onDone, setMood }) {
   useEffect(() => {
     const onKey = (e) => {
       if (e.key !== ' ' && e.key !== 'Enter' && e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+      if (onControl(e)) return;
       e.preventDefault();
       if (!revealed[current]) tapRef.current?.();
       else next(e.key === 'ArrowRight' ? 1 : -1);
@@ -445,8 +453,7 @@ function Summary({ packs, count, animateFlip, onAgain, onClose }) {
 
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key === ' ' || e.key === 'Enter') {
-        if (e.target.closest?.('button, a, input')) return;
+      if ((e.key === ' ' || e.key === 'Enter') && !onControl(e)) {
         e.preventDefault();
         onAgain(count);
       }
@@ -579,15 +586,14 @@ export function Opening({ pack, count = 1, fast = false, onClose, onAgain }) {
 
   const cards = useMemo(() => (result && count === 1 ? [...result.packs[0]].sort((a, b) => weight(a) - weight(b)) : []), [result, count]);
 
+  useScrollLock(true);
+  const root = useRef(null);
   useEffect(() => {
+    // Le focus entre dans l'écran d'ouverture : Espace n'active plus le bouton resté derrière.
+    root.current?.focus({ preventScroll: true });
     const onKey = (e) => e.key === 'Escape' && onClose();
     document.addEventListener('keydown', onKey);
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = prev;
-    };
+    return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
   const changeMood = useCallback((m) => {
@@ -600,7 +606,9 @@ export function Opening({ pack, count = 1, fast = false, onClose, onAgain }) {
 
   return createPortal(
     <motion.div
-      className="fixed inset-0 z-[70] overflow-y-auto overflow-x-hidden bg-[#05060d]/[.97]"
+      ref={root}
+      tabIndex={-1}
+      className="fixed inset-0 z-[70] overflow-y-auto overflow-x-hidden bg-[#05060d]/[.97] outline-none"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}

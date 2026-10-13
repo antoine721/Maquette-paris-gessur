@@ -88,19 +88,22 @@ test('×10 : dix boosters d’un coup', async () => {
   assert.ok(opened.every((p) => p.length === 5));
 });
 
-test('un booster thématique ne contient que sa famille', async () => {
-  const packs = createPackFactory({ wiki: wikiWith(5), store: memoryStore(), rand: seeded(3), log: quiet });
-  await packs.warmUp();
-  let off = 0;
-  let total = 0;
-  for (let i = 0; i < 12; i++) {
-    const [pack] = await packs.generatePacks('nature', 1);
-    for (const { card } of pack) {
-      total++;
-      if (card.type !== 'nature') off++;
+test('un booster thématique : sa famille d’abord, et la carte vedette toujours Rare ou mieux', async () => {
+  for (const [theme, family] of [['nature', 'nature'], ['monde', 'lieu']]) {
+    const packs = createPackFactory({ wiki: wikiWith(5), store: memoryStore(), rand: seeded(3), log: quiet });
+    await packs.warmUp();
+    let off = 0;
+    let total = 0;
+    for (let i = 0; i < 20; i++) {
+      const [pack] = await packs.generatePacks(theme, 1);
+      assert.ok(pack[4].card.rarity >= 2, `${theme} : carte vedette ${pack[4].card.rarity}`);
+      for (const { card } of pack.slice(0, 4)) {
+        total++;
+        if (card.type !== family) off++;
+      }
     }
+    assert.ok(off / total < 0.05, `${theme} : ${off}/${total} cartes ordinaires hors famille`);
   }
-  assert.ok(off / total < 0.1, `${off}/${total} cartes hors famille`);
 });
 
 test('Wikipédia injoignable : erreur claire', async () => {

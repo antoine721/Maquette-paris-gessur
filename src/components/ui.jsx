@@ -174,17 +174,28 @@ export function InfoTip({ children, label = 'En savoir plus' }) {
   );
 }
 
+// Verrou de défilement compté : plusieurs fenêtres peuvent se chevaucher (animations de sortie)
+// sans laisser la page bloquée une fois la dernière fermée.
+let scrollLocks = 0;
+export function useScrollLock(active) {
+  useEffect(() => {
+    if (!active) return undefined;
+    scrollLocks += 1;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      scrollLocks -= 1;
+      if (scrollLocks === 0) document.body.style.overflow = '';
+    };
+  }, [active]);
+}
+
 export function Modal({ open, onClose, children, className = '', label }) {
+  useScrollLock(open);
   useEffect(() => {
     if (!open) return undefined;
     const onKey = (e) => e.key === 'Escape' && onClose();
     document.addEventListener('keydown', onKey);
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = prev;
-    };
+    return () => document.removeEventListener('keydown', onKey);
   }, [open, onClose]);
   return createPortal(
     <AnimatePresence>

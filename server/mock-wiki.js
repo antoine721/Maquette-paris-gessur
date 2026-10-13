@@ -1,6 +1,7 @@
 // Faux Wikipédia pour jouer et tester hors ligne (WIKI_MOCK=1).
 // Il répond avec le même format JSON que les vraies API, pour exercer tout le code,
 // et dessine lui-même les illustrations (servies par /mock-img/).
+import { classifyType, seeded } from './cards.js';
 
 // [titre, vues par jour, longueur, langues, description, extrait, label]
 const FAMOUS = [
@@ -49,17 +50,6 @@ const ADJ = ['Les Ombres', 'Le Dernier', 'La Grande', 'Un Été', 'Le Secret', '
 const NOUN = ['de Montmartre', 'Voyage', 'Évasion', 'à Biarritz', 'du Phare', 'blanches'];
 const CONCEPTS = ['Théorème de', 'Équation de', 'Effet', 'Constante de', 'Loi de'];
 
-function makeRng(seed) {
-  let s = seed >>> 0;
-  return () => {
-    s = (s + 0x6d2b79f5) >>> 0;
-    let t = s;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
 const KINDS = [
   (pick, year) => {
     const title = `${pick(PLACE)}-sur-${pick(RIVER)}`;
@@ -97,7 +87,7 @@ const KINDS = [
 ];
 
 function buildDataset() {
-  const rng = makeRng(42);
+  const rng = seeded(42);
   const pick = (arr) => arr[Math.floor(rng() * arr.length)];
   const pages = FAMOUS.map(([title, views, length, langs, description, extract, quality], i) => ({
     pageid: 1000 + i,
@@ -151,7 +141,7 @@ export function createMockFetch({ latencyMs = 120, seed = Date.now() } = {}) {
   const byTitle = new Map(pages.map((p) => [p.title, p]));
   const byId = new Map(pages.map((p) => [p.pageid, p]));
   const obscure = pages.filter((p) => !p.famous);
-  const rng = makeRng(seed);
+  const rng = seeded(seed);
 
   const json = (body, status = 200) => ({ ok: status < 400, status, json: async () => body });
 
@@ -252,12 +242,12 @@ function motif(type, c, r) {
 function mockImage(name, byId) {
   const id = Number(String(name).replace(/\.svg$/, ''));
   const p = byId.get(id);
-  return drawArt(id, p ? classifyMock(p.description) : 'savoir');
+  return drawArt(id, p ? classifyType(p.description, p.title) : 'savoir');
 }
 
 // Illustration simple et déterministe : un motif selon la famille sur un dégradé.
 export function drawArt(id, type) {
-  const rng = makeRng(id || 7);
+  const rng = seeded(id || 7);
   const c = PALETTES[Math.floor(rng() * PALETTES.length)];
   return `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600">
   <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${c[1]}"/><stop offset="1" stop-color="${c[0]}"/></linearGradient>
@@ -265,15 +255,4 @@ export function drawArt(id, type) {
   <rect width="800" height="600" fill="url(#g)"/><rect width="800" height="600" fill="url(#l)"/>
   ${motif(type, c, rng())}
 </svg>`;
-}
-
-function classifyMock(description = '') {
-  if (/footballeur|politique|peintre|cycliste|actrice|mathématicien|chanteuse|empereur|écrivain|physicien|mathématicienne/.test(description)) return 'personnalite';
-  if (/espèce|mammifère|insecte|genre de|mollusque|pollinisateur|biologique/.test(description)) return 'nature';
-  if (/film|franchise|œuvre|tableau|jeu/.test(description)) return 'culture';
-  if (/club|course cycliste/.test(description)) return 'sport';
-  if (/bataille|révolution|période/.test(description)) return 'histoire';
-  if (/théorème|objet céleste|système planétaire|satellite/.test(description)) return 'sciences';
-  if (/commune|église|capitale|monument|tour|château|point culminant/.test(description)) return 'lieu';
-  return 'savoir';
 }

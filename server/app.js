@@ -272,16 +272,27 @@ export function createApp({ db, packs, publicDir, inviteCode = '', wikiLang = 'f
       res.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=86400' });
       return res.end(mockImage(rel.slice('/mock-img/'.length)));
     }
-    if (rel === '/' || !extname(rel)) rel = '/index.html';
-    const file = normalize(join(publicDir, rel));
+    if (rel === '/') rel = '/index.html';
+    let file = normalize(join(publicDir, rel));
     if (!file.startsWith(publicDir + sep)) return send(res, 403, { error: 'Interdit.' });
-    let stat;
+    let stat = null;
     try {
       stat = statSync(file);
-      if (!stat.isFile()) throw new Error();
+      if (!stat.isFile()) stat = null;
     } catch {
-      return send(res, 404, { error: 'Introuvable.' });
+      stat = null;
     }
+    // Toute adresse inconnue hors /assets est une page du front (ex. /joueur/jean.dupont).
+    if (!stat && !rel.startsWith('/assets/')) {
+      rel = '/index.html';
+      file = join(publicDir, rel);
+      try {
+        stat = statSync(file);
+      } catch {
+        stat = null;
+      }
+    }
+    if (!stat) return send(res, 404, { error: 'Introuvable.' });
     const etag = `"${stat.size.toString(36)}-${stat.mtimeMs.toString(36)}"`;
     const headers = {
       'Content-Type': MIME[extname(file)] ?? 'application/octet-stream',

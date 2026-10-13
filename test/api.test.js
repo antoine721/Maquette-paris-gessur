@@ -209,7 +209,17 @@ test('le fil ne garde que les belles prises', async () => {
   assert.ok(pulls.every((e) => e.card.rarity >= 3 || e.shiny));
 });
 
+test('catalogue : paramètres bornés et validés', async () => {
+  for (const q of ['limit=-1', 'limit=1.5', 'sort=constructor', 'offset=-5', 'sort=__proto__']) {
+    const res = await lea('GET', `/api/catalogue?${q}`);
+    assert.equal(res.status, 200, q);
+    assert.ok(res.body.cards.length <= 120, q);
+  }
+});
+
 test('fichiers statiques : page, cache des assets, chemins refusés', async () => {
+  assert.equal((await fetch(`${base}/joueur/jean.dupont`)).status, 200, 'un point dans l’adresse reste une page du front');
+  assert.equal((await fetch(`${base}/assets/absent.js`)).status, 404);
   const page = await fetch(`${base}/collection`);
   assert.equal(page.status, 200, 'les routes du front renvoient la page');
   assert.match(page.headers.get('content-security-policy'), /default-src 'self'/);

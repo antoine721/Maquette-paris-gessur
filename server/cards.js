@@ -62,7 +62,7 @@ const TYPE_RULES = [
   ['culture', String.raw`film|téléfilm|série|feuilleton|émission|album|single|chanson|ep|œuvre|roman|nouvelle|livre|recueil|poème|pièce de théâtre|opéra|ballet|tableau|peinture|sculpture|bande dessinée|manga|anime|dessin animé|jeu vidéo|jeu de société|personnage de fiction|groupe de musique|groupe de rock|groupe|festival|magazine|journal|revue|chaîne de télévision|station de radio|logiciel de jeu|franchise|saga|genre musical|style musical|mouvement artistique`],
   ['histoire', String.raw`bataille|guerre|siège|traité|révolution|révolte|insurrection|massacre|attentat|événement|élection|référendum|dynastie|empire|royaume|république|régime|parti politique|organisation|association|fondation|entreprise|société|institution|université|école|lycée|collège|ordre religieux|congrégation|armée|régiment|division|navire|cuirassé|sous-marin|monnaie|loi|constitution|accord|conférence|conflit|crise|épidémie`],
   ['sciences', String.raw`concept|théorie|théorème|équation|unité|constante|particule|élément chimique|composé chimique|molécule|protéine|gène|enzyme|maladie|syndrome|médicament|planète|exoplanète|étoile|galaxie|nébuleuse|astéroïde|comète|satellite|constellation|langage de programmation|logiciel|protocole|algorithme|format de fichier|système d’exploitation|technologie|technique|discipline|science|branche|méthode|matériau|alliage|appareil|instrument|outil|véhicule|automobile|avion|moteur|arme|fusil`],
-].map(([type, words]) => [type, new RegExp(`(?<![\\p{L}\\p{N}])(${words})(?![\\p{L}\\p{N}])`, 'u')]);
+].map(([type, words]) => [type, new RegExp(`(?<![\\p{L}\\p{N}])(?:${words})(?:s|x)?(?![\\p{L}\\p{N}])`, 'u')]);
 
 export function classifyType(description = '', title = '') {
   const text = `${description}`.toLocaleLowerCase('fr');
@@ -114,14 +114,15 @@ const clamp01 = (x) => Math.min(1, Math.max(0, x));
 
 // La longueur de l'article nourrit l'attaque, sa qualité (langues, label) la défense :
 // le côté le plus fort de la carte suit le point fort de l'article.
-export function statsFor({ pageId, rarity, length = 0, langs = 0, quality = null }) {
+// Si le nombre de langues est inconnu, la popularité sert d'indice de qualité.
+export function statsFor({ pageId, rarity, length = 0, langs = null, quality = null, views30 = 0 }) {
   const rng = seeded(Math.imul(pageId, 2654435761));
   const [lo, hi] = RARITIES[rarity].stat;
   const best = Math.round(lo + rng() * (hi - lo));
   const other = Math.round(best * (0.5 + rng() * 0.5));
   const lengthScore = clamp01((Math.log10(Math.max(length, 1)) - 2.7) / 2.7);
-  const qualityScore =
-    clamp01(Math.log10((langs ?? 0) + 1) / Math.log10(250)) + (quality === 'AdQ' ? 0.35 : quality === 'BA' ? 0.2 : 0);
+  const reach = langs == null ? Math.log10(views30 + 1) / Math.log10(600000) : Math.log10(langs + 1) / Math.log10(250);
+  const qualityScore = clamp01(reach) + (quality === 'AdQ' ? 0.35 : quality === 'BA' ? 0.2 : 0);
   return lengthScore >= qualityScore ? { atk: best, def: other } : { atk: other, def: best };
 }
 
@@ -141,6 +142,8 @@ export function cleanImage(url) {
   return IMAGE_PREFIXES.some((p) => url.startsWith(p)) ? url : null;
 }
 
+export const cleanDescription = (text) => cleanText(text, 140);
+
 export function cleanText(text, max) {
   if (typeof text !== 'string') return '';
   const t = text.replace(/\s+/g, ' ').trim();
@@ -152,7 +155,7 @@ export function cleanText(text, max) {
 // Une carte complète, prête à être enregistrée, à partir des données de Wikipédia.
 export function buildCard(d) {
   const rarity = rarityFromViews(d.views30 ?? 0);
-  const description = cleanText(d.description, 140);
+  const description = cleanDescription(d.description);
   const base = {
     pageId: d.pageId,
     title: d.title,
@@ -163,7 +166,7 @@ export function buildCard(d) {
     imageHeight: d.imageHeight ?? null,
     wikidata: typeof d.wikidata === 'string' && /^Q\d+$/.test(d.wikidata) ? d.wikidata : null,
     length: d.length ?? 0,
-    langs: d.langs ?? 0,
+    langs: Number.isInteger(d.langs) ? d.langs : null,
     quality: d.quality === 'AdQ' || d.quality === 'BA' ? d.quality : null,
     views30: Math.round(d.views30 ?? 0),
     daily: Array.isArray(d.daily) ? d.daily.slice(-30) : [],

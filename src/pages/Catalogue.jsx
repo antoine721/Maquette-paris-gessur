@@ -52,7 +52,10 @@ export default function Catalogue() {
         limit: PAGE,
         offset: res.cards.length,
       });
-      setRes((old) => ({ total: r.total, cards: [...old.cards, ...r.cards] }));
+      setRes((old) => {
+        const seen = new Set(old.cards.map((c) => c.pageId));
+        return { total: r.total, cards: [...old.cards, ...r.cards.filter((c) => !seen.has(c.pageId))] };
+      });
     } catch (e) {
       toast.error(e);
     }

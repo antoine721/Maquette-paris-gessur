@@ -29,7 +29,7 @@ export function Logo({ className = '' }) {
 }
 
 function LiveToasts() {
-  const { me } = useSession();
+  const { me, refresh } = useSession();
   const toast = useToast();
   useLive('feed', (events) => {
     for (const ev of events) {
@@ -50,6 +50,7 @@ function LiveToasts() {
           </>,
           { kind: 'gift', color: r.color, image: ev.card.image, duration: 7000 },
         );
+        refresh();
       } else if (ev.type === 'join') {
         toast.push(
           <>

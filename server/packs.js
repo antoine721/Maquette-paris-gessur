@@ -112,10 +112,10 @@ export function createPackFactory({ wiki, store, rand = Math.random, log = conso
     return refilling;
   }
 
-  // Un article de la rareté voulue (ou en dessous), de préférence dans les familles du booster.
-  function take(tier, types, used) {
+  // Un article de la rareté voulue (ou en dessous, sans passer sous `floor`), dans les familles demandées.
+  function take(tier, types, used, floor = 0) {
     const fits = (p) => !used.has(p.pageId) && (!types || types.includes(p.type));
-    for (let t = tier; t >= 0; t--) {
+    for (let t = tier; t >= floor; t--) {
       const i = buffers[t].findIndex(fits);
       if (i >= 0) {
         const [p] = buffers[t].splice(i, 1);
@@ -130,17 +130,22 @@ export function createPackFactory({ wiki, store, rand = Math.random, log = conso
 
   async function pickPack(theme) {
     const { types } = packByKey(theme);
-    const tiers = [...Array.from({ length: PACK_SIZE - 1 }, () => roll(SLOT_ODDS, rand)), roll(FEATURED_ODDS, rand)];
+    const featuredFloor = Math.min(...FEATURED_ODDS.map(([t]) => t));
+    const slots = [
+      ...Array.from({ length: PACK_SIZE - 1 }, () => ({ tier: roll(SLOT_ODDS, rand), floor: 0 })),
+      { tier: roll(FEATURED_ODDS, rand), floor: featuredFloor },
+    ];
     const used = new Set();
     const picks = [];
-    for (const tier of tiers) {
-      let p = take(tier, types, used);
+    for (const { tier, floor } of slots) {
+      let p = take(tier, types, used, floor);
       for (let attempt = 0; !p && types && attempt < 2; attempt++) {
         await refill({ extraRandom: 2 });
-        p = take(tier, types, used);
+        p = take(tier, types, used, floor);
       }
-      // Famille introuvable pour l'instant : une carte d'une autre famille plutôt qu'un trou.
-      p ??= take(tier, null, used);
+      // Famille introuvable : la carte vedette garde sa rareté (Rare ou mieux) quitte à changer de famille ;
+      // en dernier recours, n'importe quelle carte plutôt qu'un trou.
+      p ??= take(tier, null, used, floor) ?? take(tier, types, used) ?? take(tier, null, used);
       if (p) picks.push(p);
     }
     return picks;
@@ -155,9 +160,11 @@ export function createPackFactory({ wiki, store, rand = Math.random, log = conso
     const details = new Map();
     for (const part of await Promise.all(chunks.map((c) => wiki.details(c)))) for (const [k, v] of part) details.set(k, v);
     for (const p of pages) {
-      if (byId.has(p.pageId)) continue;
-      store.insertCard(buildCard({ ...p, ...(details.get(p.pageId) ?? {}) }));
-      byId.set(p.pageId, store.getCards([p.pageId]).get(p.pageId));
+      // Une carte est figée pour toujours : sans ses détails (page supprimée entre-temps), on ne la crée pas.
+      if (byId.has(p.pageId) || !details.has(p.pageId)) continue;
+      store.insertCard(buildCard({ ...p, ...details.get(p.pageId) }));
+      const saved = store.getCards([p.pageId]).get(p.pageId);
+      if (saved) byId.set(p.pageId, saved);
     }
     return byId;
   }

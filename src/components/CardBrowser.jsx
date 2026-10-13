@@ -134,7 +134,13 @@ export function FilterBar({ f, set, counts, showOwnedChips = true, sorts = SORTS
 export function CardGrid({ cards, badge }) {
   const [shown, setShown] = useState(48);
   const sentinel = useRef(null);
-  useEffect(() => setShown(48), [cards]);
+  const prev = useRef(cards);
+  useEffect(() => {
+    // Une liste qui s'allonge (« Voir plus ») garde ce qui est affiché ; un nouveau filtre repart du début.
+    const extended = cards.length >= prev.current.length && prev.current.every((c, i) => cards[i]?.pageId === c.pageId);
+    if (!extended) setShown(48);
+    prev.current = cards;
+  }, [cards]);
   useEffect(() => {
     const el = sentinel.current;
     if (!el) return undefined;

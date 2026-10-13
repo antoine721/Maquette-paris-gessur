@@ -127,6 +127,9 @@ test('construction d’une carte complète', () => {
   assert.equal(card.wikidata, 'Q146');
   assert.ok(Math.max(card.atk, card.def) >= 8500);
   assert.equal(buildCard({ pageId: 2, title: 'X', wikidata: 'pas un id' }).wikidata, null);
+  const unknownLangs = buildCard({ pageId: 3, title: 'Y', views30: 3000, langs: null });
+  assert.equal(unknownLangs.langs, null, 'un nombre de langues inconnu reste inconnu');
+  assert.ok(Math.max(unknownLangs.atk, unknownLangs.def) >= 5000);
 });
 
 test('les pages techniques ne sont pas des articles', () => {
