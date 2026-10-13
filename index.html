@@ -1,0 +1,1009 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Guessr Group</title>
+<meta name="description" content="Guessr Group : les jeux de ParisGuessr dans les métros d'Europe. Metrodle, Trios, Hubs, Stations, La Grille, Connect et Memory, ville par ville.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&family=Atkinson+Hyperlegible+Mono:wght@400;500;700&family=Atkinson+Hyperlegible+Next:ital,wght@0,400;0,500;0,700;1,400&display=swap">
+<style>
+/* Layout : la page se lit comme un plan de réseau. Un hero jouable façon « plan de ligne » de rame,
+   puis une carte schématique de l'Europe où chaque ville est une station et l'ordre de lancement une ligne. */
+:root{
+  --paper:#F2F4F8;        /* papier de plan, bleuté */
+  --surface:#FFFFFF;
+  --ink:#0C1736;          /* bleu émail profond */
+  --muted:#535E7C;
+  --rule:#D3D9E5;
+  --enamel:#13215A;       /* plaque émaillée */
+  --enamel-edge:#13215A;
+  --enamel-ink:#F3F5FB;
+  --enamel-muted:#AEB8DA;
+  --signal:#FFC400;       /* jaune signal */
+  --signal-ink:#0C1736;
+  --panel:#FBFCFE;        /* panneau éclairé, identique dans les deux thèmes */
+  --panel-ink:#0C1736;
+  --panel-muted:#5A6482;
+  --focus:#2453D6;
+  --ok:#62D394;
+  --ko:#FF8F86;
+  --l-yellow:#FFC400;
+  --l-red:#E2231A;
+  --l-blue:#2A62D4;
+  --l-purple:#8E5BB8;
+  --l-green:#1E9E5A;
+  --shadow:0 30px 60px -32px rgba(12,23,54,.55);
+
+  --font-display:"Archivo","Arial Narrow",system-ui,sans-serif;
+  --font-body:"Atkinson Hyperlegible Next",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --font-mono:"Atkinson Hyperlegible Mono",ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+
+  --step--1:.8125rem;
+  --step-0:1.0625rem;
+  --step-1:1.25rem;
+  --step-2:clamp(1.45rem,2vw,1.7rem);
+  --step-3:clamp(2rem,3.6vw,3.1rem);
+  --step-4:clamp(2.55rem,5.4vw,4.75rem);
+  --radius:14px;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#080E24; --surface:#0F1835; --ink:#EBEFF8; --muted:#9AA5C6; --rule:#222D55;
+    --enamel:#15246A; --enamel-edge:#2C3C85; --enamel-ink:#F3F5FB; --enamel-muted:#AEB8DA;
+    --signal:#FFC400; --signal-ink:#0C1736;
+    --panel:#EEF1F8; --panel-ink:#0C1736; --panel-muted:#5A6482;
+    --focus:#8FB0FF; --ok:#62D394; --ko:#FF8F86;
+    --l-yellow:#FFC400; --l-red:#F0423A; --l-blue:#4F84F0; --l-purple:#A87BD4; --l-green:#2DB872;
+    --shadow:0 30px 60px -30px rgba(0,0,0,.7);
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#080E24; --surface:#0F1835; --ink:#EBEFF8; --muted:#9AA5C6; --rule:#222D55;
+  --enamel:#15246A; --enamel-edge:#2C3C85; --enamel-ink:#F3F5FB; --enamel-muted:#AEB8DA;
+  --signal:#FFC400; --signal-ink:#0C1736;
+  --panel:#EEF1F8; --panel-ink:#0C1736; --panel-muted:#5A6482;
+  --focus:#8FB0FF; --ok:#62D394; --ko:#FF8F86;
+  --l-yellow:#FFC400; --l-red:#F0423A; --l-blue:#4F84F0; --l-purple:#A87BD4; --l-green:#2DB872;
+  --shadow:0 30px 60px -30px rgba(0,0,0,.7);
+  color-scheme:dark;
+}
+
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;scroll-behavior:smooth;scroll-padding-top:84px}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--font-body);font-size:var(--step-0);line-height:1.55;-webkit-font-smoothing:antialiased}
+img,svg{max-width:100%}
+a{color:inherit}
+:focus-visible{outline:3px solid var(--focus);outline-offset:3px;border-radius:4px}
+h1,h2,h3{margin:0;text-wrap:balance}
+p{margin:0}
+.wrap{max-width:1200px;margin-inline:auto;padding-inline:clamp(16px,4vw,40px)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+.eyebrow{display:inline-flex;align-items:center;gap:10px;font-family:var(--font-mono);font-size:var(--step--1);font-weight:500;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.eyebrow::before{content:"";width:12px;height:12px;border-radius:50%;background:var(--surface);border:3px solid var(--ink)}
+.h2{font-family:var(--font-display);font-stretch:112%;font-weight:800;font-size:var(--step-3);line-height:1.02;letter-spacing:-.015em}
+.lead{font-size:var(--step-1);line-height:1.5;max-width:36rem;color:var(--muted)}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;min-height:48px;padding:0 20px;border-radius:8px;font-family:var(--font-display);font-stretch:108%;font-weight:700;font-size:1rem;text-decoration:none;cursor:pointer;border:2px solid transparent;transition:transform .15s ease, background-color .15s ease, border-color .15s ease}
+.btn:active{transform:translateY(1px)}
+.btn-primary{background:var(--signal);color:var(--signal-ink);box-shadow:inset 0 -3px 0 rgba(12,23,54,.22)}
+.btn-primary:hover{background:#FFD23D}
+.btn-ghost{border-color:var(--ink);color:var(--ink);background:transparent}
+.btn-ghost:hover{background:var(--ink);color:var(--paper)}
+.btn .arr{font-family:var(--font-mono);font-weight:700}
+
+/* ---------- Nav ---------- */
+.nav{position:sticky;top:env(safe-area-inset-top,0px);z-index:30;background:color-mix(in srgb,var(--paper) 86%,transparent);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);border-bottom:1px solid var(--rule)}
+.nav .wrap{display:flex;align-items:center;gap:28px;min-height:66px}
+.logo{display:inline-flex;align-items:center;gap:10px;text-decoration:none;color:var(--ink)}
+.logo svg{width:34px;height:34px;flex:none}
+.logo-word{font-family:var(--font-display);font-stretch:125%;font-weight:850;font-size:1.3rem;letter-spacing:-.02em;line-height:1}
+.logo-group{font-family:var(--font-mono);font-size:.68rem;font-weight:700;letter-spacing:.16em;text-transform:uppercase;padding:3px 6px 2px;border:1.5px solid var(--ink);border-radius:4px;line-height:1}
+.nav-links{display:flex;gap:26px;margin-left:auto;list-style:none;padding:0;margin-block:0}
+.nav-links a{text-decoration:none;font-weight:500;font-size:.98rem;padding-block:6px;border-bottom:2px solid transparent}
+.nav-links a:hover{border-bottom-color:var(--signal)}
+.nav .btn{min-height:40px;padding:0 16px;font-size:.95rem}
+@media (max-width:760px){.nav-links{display:none}.nav .btn{margin-left:auto}}
+
+/* ---------- Hero ---------- */
+.hero{padding-block:clamp(36px,6vw,88px) clamp(56px,7vw,96px)}
+.hero .wrap{display:grid;grid-template-columns:minmax(0,1.04fr) minmax(0,.96fr);gap:clamp(36px,5vw,72px);align-items:center}
+@media (max-width:980px){.hero .wrap{grid-template-columns:minmax(0,1fr)}}
+.hero-copy{display:flex;flex-direction:column;align-items:flex-start;gap:26px;min-width:0}
+.announce{display:inline-flex;align-items:center;gap:10px;font-family:var(--font-mono);font-size:.78rem;font-weight:500;letter-spacing:.05em;text-transform:uppercase;text-decoration:none;border:1.5px solid var(--ink);border-radius:7px;padding:5px 12px 5px 5px}
+.announce b{background:var(--signal);color:var(--signal-ink);padding:3px 7px 2px;border-radius:4px;font-weight:700}
+.announce:hover{background:var(--surface)}
+.headline{font-family:var(--font-display);font-stretch:116%;font-weight:850;font-size:var(--step-4);line-height:.95;letter-spacing:-.025em;display:grid}
+.headline .hl{grid-area:1/1;transition:opacity .4s ease, transform .4s ease;text-wrap:balance}
+.headline .hl[aria-hidden="true"]{opacity:0;transform:translateY(.22em);visibility:hidden}
+.headline .hl em{font-style:normal;background:linear-gradient(transparent 62%,var(--signal) 62%,var(--signal) 90%,transparent 90%);padding-inline:.04em}
+.hero .lead{color:var(--ink);opacity:.86}
+.cta-row{display:flex;flex-wrap:wrap;gap:12px}
+.facts{display:flex;flex-wrap:wrap;gap:0;margin:0;padding:0}
+.facts div{display:flex;flex-direction:column-reverse;padding-inline:0 22px;margin-inline:0 22px;border-right:1.5px solid var(--rule)}
+.facts div:last-child{border-right:0;margin-right:0;padding-right:0}
+.facts dd{margin:0;font-family:var(--font-display);font-stretch:112%;font-weight:800;font-size:1.9rem;line-height:1;font-variant-numeric:tabular-nums}
+.facts dt{font-family:var(--font-mono);font-size:.74rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-top:6px}
+@media (max-width:480px){.facts div{padding-right:14px;margin-right:14px}}
+
+/* ---------- Trios (démo) ---------- */
+.trios{background:var(--enamel);color:var(--enamel-ink);border:1px solid var(--enamel-edge);border-radius:20px;padding:14px;box-shadow:var(--shadow);min-width:0}
+.trios-top{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px 16px;padding:4px 4px 14px}
+.trios-title{display:flex;align-items:baseline;gap:10px}
+.trios-title b{font-family:var(--font-display);font-stretch:125%;font-weight:850;font-size:1.15rem;letter-spacing:-.01em}
+.trios-title span{font-family:var(--font-mono);font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:var(--enamel-muted)}
+.tabs{display:flex;flex-wrap:wrap;gap:4px}
+.tab{position:relative;font-family:var(--font-mono);font-size:.74rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--enamel-muted);background:transparent;border:1.5px solid rgba(255,255,255,.14);border-radius:6px;padding:7px 9px 6px;cursor:pointer;transition:background-color .15s, color .15s}
+.tab:hover{color:var(--enamel-ink);border-color:rgba(255,255,255,.4)}
+.tab[aria-selected="true"]{background:var(--enamel-ink);color:var(--enamel);border-color:var(--enamel-ink)}
+.tab[data-state="won"]::after,.tab[data-state="lost"]::after{content:"";position:absolute;top:-4px;right:-4px;width:10px;height:10px;border-radius:50%;border:2px solid var(--enamel)}
+.tab[data-state="won"]::after{background:var(--ok)}
+.tab[data-state="lost"]::after{background:var(--ko)}
+.tab:focus-visible{outline-color:var(--signal)}
+
+.plan{background:var(--panel);color:var(--panel-ink);border-radius:12px;padding:16px 16px 22px;overflow:hidden}
+.plan-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:.92rem}
+.plan-dir{font-weight:700}
+.plan-brand{margin-left:auto;font-family:var(--font-mono);font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--panel-muted)}
+.badge{display:inline-flex;align-items:center;justify-content:center;flex:none;font-family:var(--font-display);font-stretch:100%;font-weight:800;line-height:1;background:var(--b);color:var(--t)}
+.badge.circle{width:30px;height:30px;border-radius:50%;font-size:1rem}
+.badge.square{height:28px;min-width:34px;padding:0 6px;border-radius:5px;font-size:.92rem}
+.badge.rect{height:26px;min-width:38px;padding:0 7px;border-radius:2px;font-size:.92rem}
+.badge.bar{height:26px;padding:0 12px;border-radius:13px;font-size:.82rem;font-stretch:112%;letter-spacing:.02em}
+.plan-line{position:relative;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));margin-top:24px}
+.plan-line::before{content:"";position:absolute;left:-16px;right:-16px;top:10px;height:10px;background:var(--line);transition:background-color .3s}
+.stop{position:relative;display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center;min-width:0;padding-inline:4px}
+.stop .dot{width:30px;height:30px;border-radius:50%;background:#fff;border:6px solid var(--line);transition:border-color .3s, transform .3s}
+.stop .name{font-weight:700;font-size:.98rem;line-height:1.2;overflow-wrap:anywhere}
+.stop.mystery .dot{border-color:var(--panel-ink);border-style:dashed;background:var(--signal);display:grid;place-items:center;font:800 .8rem/1 var(--font-display);color:var(--panel-ink)}
+.stop.mystery .name{font-family:var(--font-mono);font-size:.82rem;font-weight:700;letter-spacing:.1em;color:var(--panel-muted);border:1.5px dashed var(--panel-muted);border-radius:5px;padding:3px 10px}
+.stop.mystery.revealed .dot{border-style:solid;border-color:var(--line);background:#fff;color:transparent;transform:scale(1.18)}
+.stop.mystery.revealed .name{font-family:var(--font-body);font-size:.98rem;letter-spacing:0;color:var(--panel-ink);border:0;padding:0;animation:pop .45s ease both}
+@keyframes pop{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+.trios-play{padding:16px 4px 4px;display:flex;flex-direction:column;gap:12px}
+.prompt{font-weight:700;font-size:1rem}
+.choices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.choice{min-height:46px;text-align:left;padding:10px 12px;border-radius:8px;border:1.5px solid rgba(255,255,255,.2);background:rgba(255,255,255,.06);color:var(--enamel-ink);font:500 .95rem/1.25 var(--font-body);cursor:pointer;transition:border-color .15s, background-color .15s}
+.choice:hover:not(:disabled){border-color:var(--signal);background:rgba(255,196,0,.1)}
+.choice:focus-visible{outline-color:var(--signal)}
+.choice:disabled{cursor:default}
+.choice.wrong{text-decoration:line-through;color:var(--ko);border-color:rgba(255,143,134,.45);background:transparent}
+.choice.right{background:var(--ok);border-color:var(--ok);color:#0C1736;font-weight:700}
+.choice.shake{animation:shake .35s ease}
+@keyframes shake{20%{transform:translateX(-5px)}40%{transform:translateX(5px)}60%{transform:translateX(-3px)}80%{transform:translateX(2px)}}
+.feedback{min-height:1.5em;font-size:.95rem;color:var(--enamel-muted)}
+.feedback.good{color:var(--ok)}
+.feedback.bad{color:var(--ko)}
+.trios-foot{display:flex;align-items:center;flex-wrap:wrap;gap:10px 18px;border-top:1px solid rgba(255,255,255,.12);padding-top:12px;font-family:var(--font-mono);font-size:.76rem;letter-spacing:.08em;text-transform:uppercase;color:var(--enamel-muted)}
+.tries{display:flex;align-items:center;gap:6px}
+.tries i{width:10px;height:10px;border-radius:50%;background:var(--signal)}
+.tries i.used{background:transparent;border:1.5px solid var(--enamel-muted)}
+.score b{color:var(--enamel-ink);font-variant-numeric:tabular-nums}
+.next{margin-left:auto;font:700 .76rem/1 var(--font-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--enamel-ink);background:transparent;border:1.5px solid rgba(255,255,255,.35);border-radius:6px;padding:8px 10px 7px;cursor:pointer}
+.next:hover{border-color:var(--signal);color:var(--signal)}
+.next:focus-visible{outline-color:var(--signal)}
+
+/* ---------- Sections ---------- */
+.section{padding-block:clamp(64px,9vw,120px)}
+.section-head{display:grid;gap:18px;max-width:46rem;margin-bottom:clamp(32px,5vw,56px)}
+
+/* Groupe */
+.groupe{border-top:1px solid var(--rule)}
+.brandline{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:1.25fr repeat(5,minmax(0,1fr)) .8fr;align-items:start;position:relative}
+.brandline::before{content:"";position:absolute;left:0;right:0;top:46px;height:10px;background:var(--ink);border-radius:5px}
+.brandline li{position:relative;display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center;min-width:0}
+.bl-root{align-items:flex-start!important;text-align:left!important}
+.plate{display:inline-flex;align-items:center;justify-content:center;min-height:38px;padding:0 12px;border-radius:5px;background:var(--enamel);color:var(--enamel-ink);font-family:var(--font-display);font-stretch:92%;font-weight:700;font-size:.92rem;letter-spacing:.01em;box-shadow:inset 0 0 0 3px var(--enamel),inset 0 0 0 4.5px rgba(243,245,251,.8);white-space:nowrap}
+.plate-root{min-height:100px;padding:14px 18px;flex-direction:column;align-items:flex-start;gap:4px;font-stretch:118%;font-weight:850;font-size:1.35rem;background:var(--signal);color:var(--signal-ink);box-shadow:inset 0 0 0 3px var(--signal),inset 0 0 0 4.5px rgba(12,23,54,.6);border-radius:8px;white-space:normal;line-height:1}
+.plate-root small{font-family:var(--font-mono);font-size:.68rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase}
+.bl-dot{width:30px;height:30px;margin-top:36px;border-radius:50%;background:var(--surface);border:6px solid var(--c);box-shadow:0 0 0 3px var(--paper)}
+.bl-status{font-family:var(--font-mono);font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.bl-status.live{color:var(--ink);font-weight:700}
+.bl-status.live::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--l-green);margin-right:6px;vertical-align:1px}
+.bl-more .bl-dot{border-color:var(--rule);border-style:dashed}
+.bl-more strong{font-family:var(--font-display);font-stretch:112%;font-weight:800;font-size:1.05rem}
+@media (max-width:900px){
+  .brandline{grid-template-columns:minmax(0,1fr);gap:14px;padding-left:4px}
+  .brandline::before{left:17px;right:auto;top:20px;bottom:20px;width:10px;height:auto}
+  .brandline li{flex-direction:row;align-items:center;text-align:left;gap:14px}
+  .bl-root{padding-left:0}
+  .plate-root{min-height:0;margin-left:46px}
+  .bl-dot{margin-top:0;flex:none}
+}
+.principles{list-style:none;margin:clamp(40px,6vw,64px) 0 0;padding:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:clamp(20px,3vw,40px)}
+.principles li{border-top:3px solid var(--ink);padding-top:16px;display:grid;gap:8px;align-content:start}
+.principles h3{font-family:var(--font-display);font-stretch:108%;font-weight:800;font-size:var(--step-1);line-height:1.15}
+.principles p{color:var(--muted);max-width:30rem}
+.principles .tag{font-family:var(--font-mono);font-size:.72rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+@media (max-width:820px){.principles{grid-template-columns:minmax(0,1fr)}}
+
+/* Jeux */
+.jeux{background:var(--surface);border-block:1px solid var(--rule)}
+.games{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+.game{display:flex;flex-direction:column;gap:10px;padding:20px;border-radius:var(--radius);border:1.5px solid var(--rule);background:var(--paper);text-decoration:none;color:var(--ink);min-width:0;transition:border-color .2s, transform .2s}
+.game:hover{border-color:var(--ink);transform:translateY(-2px)}
+.game svg.pg{width:100%;max-width:200px;height:72px;margin-bottom:6px}
+.game h3{font-family:var(--font-display);font-stretch:115%;font-weight:850;font-size:1.45rem;line-height:1;letter-spacing:-.01em}
+.game .tag{font-family:var(--font-mono);font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.game p{color:var(--muted);font-size:.98rem}
+.game .go{margin-top:auto;padding-top:8px;font-family:var(--font-display);font-stretch:108%;font-weight:700;font-size:.95rem;display:inline-flex;gap:8px}
+.game:hover .go .arr{transform:translateX(3px)}
+.go .arr{font-family:var(--font-mono);transition:transform .2s}
+.g-metrodle{grid-column:span 2;grid-row:span 2;background:var(--enamel);color:var(--enamel-ink);border-color:var(--enamel-edge);padding:26px}
+.g-metrodle:hover{border-color:var(--signal)}
+.g-metrodle h3{font-size:clamp(2rem,3.2vw,2.6rem)}
+.g-metrodle p,.g-metrodle .tag{color:var(--enamel-muted)}
+.g-metrodle .tag b{color:var(--signal);font-weight:700}
+.g-metrodle .go{color:var(--signal)}
+.g-explorer{grid-column:span 2;flex-direction:row;align-items:center;gap:20px}
+.g-explorer svg.pg{width:170px;flex:none;margin:0}
+.g-explorer .txt{display:flex;flex-direction:column;gap:8px;min-width:0}
+@media (max-width:1040px){.games{grid-template-columns:repeat(2,minmax(0,1fr))}.g-metrodle{grid-row:auto}}
+@media (max-width:640px){.games{grid-template-columns:minmax(0,1fr)}.g-metrodle,.g-explorer{grid-column:auto}.g-explorer{flex-direction:column;align-items:flex-start}}
+
+.md-board{list-style:none;margin:12px 0 4px;padding:0;display:grid;gap:6px;font-size:.95rem}
+.md-board li{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1.4fr) auto;align-items:center;gap:12px;padding:9px 12px;border-radius:8px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1)}
+.md-board li.win{background:var(--signal);color:var(--signal-ink);border-color:var(--signal)}
+.md-board .nm{font-weight:700;overflow-wrap:anywhere}
+.md-board .ln{display:flex;flex-wrap:wrap;gap:4px}
+.md-board .ds{font-family:var(--font-mono);font-size:.82rem;font-variant-numeric:tabular-nums;white-space:nowrap}
+.pb{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--b);color:var(--t);font:800 .72rem/1 var(--font-display);box-shadow:0 0 0 1.5px rgba(255,255,255,.85)}
+.pb.off{opacity:.28}
+.md-head{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1.4fr) auto;gap:12px;padding:0 13px;font-family:var(--font-mono);font-size:.66rem;letter-spacing:.1em;text-transform:uppercase;color:var(--enamel-muted);margin-top:8px}
+
+/* Villes */
+.villes-grid{display:grid;grid-template-columns:minmax(0,1.75fr) minmax(0,1fr);gap:clamp(20px,3vw,36px);align-items:start}
+@media (max-width:960px){.villes-grid{grid-template-columns:minmax(0,1fr)}}
+.map-box{background:var(--surface);border:1.5px solid var(--rule);border-radius:var(--radius);padding:12px;min-width:0}
+.map-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.map-scroll svg{display:block;width:100%;height:auto;min-width:560px}
+.map-legend{display:flex;flex-wrap:wrap;gap:8px 18px;padding:12px 6px 4px;font-family:var(--font-mono);font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.map-legend span{display:inline-flex;align-items:center;gap:8px}
+.map-legend svg{width:22px;height:22px}
+.map-note{padding:4px 6px 2px;font-size:.84rem;color:var(--muted)}
+
+.m-line{fill:none;stroke-width:9;stroke-linecap:round;stroke-linejoin:round}
+.m-grid{fill:var(--rule)}
+.m-st{cursor:pointer}
+.m-st circle.mk{fill:var(--surface);stroke:var(--ink);stroke-width:3.5;transition:transform .2s}
+.m-st.w0 circle.mk{fill:var(--signal);stroke:var(--ink);stroke-width:4}
+.m-st.w3 circle.mk{stroke:var(--muted);stroke-width:3}
+.m-st circle.halo{fill:none;stroke:var(--signal);stroke-width:4;opacity:0}
+.m-st.sel circle.halo{opacity:1}
+.m-st text{font-family:var(--font-display);font-stretch:96%;font-weight:600;font-size:15px;fill:var(--ink);paint-order:stroke;stroke:var(--surface);stroke-width:5px;stroke-linejoin:round}
+.m-st.w3 text{fill:var(--muted);font-weight:500}
+.m-st.w0 text{font-weight:850;font-size:19px;font-stretch:112%}
+.m-st.sel text{font-weight:800;fill:var(--ink)}
+.m-st:focus{outline:none}
+.m-st:focus-visible circle.halo{opacity:1;stroke:var(--focus)}
+.m-pulse{fill:none;stroke:var(--signal);stroke-width:3;transform-box:fill-box;transform-origin:center;animation:pulse 2.4s ease-out infinite}
+@keyframes pulse{from{transform:scale(1);opacity:.9}to{transform:scale(2.6);opacity:0}}
+
+.fiche{background:var(--enamel);color:var(--enamel-ink);border:1px solid var(--enamel-edge);border-radius:var(--radius);padding:24px;display:flex;flex-direction:column;gap:16px;min-width:0}
+.fiche .kicker{font-family:var(--font-mono);font-size:.74rem;letter-spacing:.12em;text-transform:uppercase;color:var(--enamel-muted)}
+.fiche h3{font-family:var(--font-display);font-stretch:118%;font-weight:850;font-size:clamp(2.1rem,3.6vw,2.9rem);line-height:1;letter-spacing:-.02em}
+.fiche .exo{color:var(--enamel-muted);margin-top:-8px;min-height:1.55em}
+.fiche dl{margin:0;display:grid;gap:0;border-top:1px solid rgba(255,255,255,.14)}
+.fiche dl div{display:flex;justify-content:space-between;gap:16px;padding:11px 0;border-bottom:1px solid rgba(255,255,255,.14)}
+.fiche dt{color:var(--enamel-muted);font-size:.95rem}
+.fiche dd{margin:0;font-weight:700;text-align:right;font-variant-numeric:tabular-nums}
+.chip{display:inline-flex;align-items:center;gap:7px;font-family:var(--font-mono);font-size:.74rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:4px 9px 3px;border-radius:5px;border:1.5px solid currentColor}
+.chip.live{background:var(--signal);color:var(--signal-ink);border-color:var(--signal)}
+.fiche .btn{align-self:flex-start}
+.fiche .btn-ghost{border-color:var(--enamel-ink);color:var(--enamel-ink)}
+.fiche .btn-ghost:hover{background:var(--enamel-ink);color:var(--enamel)}
+
+.waves{list-style:none;margin:clamp(40px,6vw,64px) 0 0;padding:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:24px;position:relative}
+.waves::before{content:"";position:absolute;left:12px;right:12px;top:11px;height:8px;background:var(--ink);border-radius:4px}
+.wave{position:relative;display:flex;flex-direction:column;gap:10px;min-width:0}
+.wave .wdot{width:30px;height:30px;border-radius:50%;background:var(--surface);border:5px solid var(--ink);box-shadow:0 0 0 4px var(--paper)}
+.wave.w0 .wdot{background:var(--signal)}
+.wave h3{font-family:var(--font-display);font-stretch:112%;font-weight:800;font-size:var(--step-1);margin-top:6px}
+.wave > p{color:var(--muted);font-size:.95rem}
+.wave ul{list-style:none;margin:4px 0 0;padding:0;display:flex;flex-wrap:wrap;gap:6px}
+.city-chip{display:inline-flex;align-items:center;gap:7px;font:600 .9rem/1 var(--font-body);color:var(--ink);background:var(--surface);border:1.5px solid var(--rule);border-radius:6px;padding:7px 9px;cursor:pointer;transition:border-color .15s}
+.city-chip:hover,.city-chip[aria-pressed="true"]{border-color:var(--ink)}
+.city-chip small{font-family:var(--font-mono);font-size:.68rem;letter-spacing:.06em;color:var(--muted)}
+@media (max-width:900px){
+  .waves{grid-template-columns:minmax(0,1fr);gap:28px;padding-left:46px}
+  .waves::before{left:11px;right:auto;top:12px;bottom:12px;width:8px;height:auto}
+  .wave .wdot{position:absolute;left:-46px;top:0}
+  .wave h3{margin-top:2px}
+}
+
+/* Prévenir */
+.prevenir{background:var(--enamel);color:var(--enamel-ink)}
+.prevenir .wrap{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:clamp(28px,5vw,64px);align-items:center}
+@media (max-width:900px){.prevenir .wrap{grid-template-columns:minmax(0,1fr)}}
+.prevenir .eyebrow{color:var(--enamel-muted)}
+.prevenir .eyebrow::before{background:var(--signal);border-color:var(--enamel-ink)}
+.prevenir .lead{color:var(--enamel-muted)}
+.form{display:grid;gap:14px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.14);border-radius:var(--radius);padding:clamp(18px,3vw,28px)}
+.field{display:grid;gap:6px;min-width:0}
+.field label{font-family:var(--font-mono);font-size:.74rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--enamel-muted)}
+.field select,.field input{width:100%;min-height:50px;border-radius:8px;border:1.5px solid rgba(255,255,255,.28);background:var(--panel);color:var(--panel-ink);font:500 1rem var(--font-body);padding:0 14px;color-scheme:light}
+.field select:focus-visible,.field input:focus-visible{outline:3px solid var(--signal);outline-offset:2px}
+.form-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);gap:12px}
+@media (max-width:520px){.form-row{grid-template-columns:minmax(0,1fr)}}
+.form .btn{width:100%}
+.form-msg{min-height:1.5em;font-size:.95rem;color:var(--enamel-muted)}
+.form-msg.good{color:var(--ok)}
+.form-msg.bad{color:var(--ko)}
+
+/* Footer */
+.footer{padding-block:56px 40px}
+.footer .wrap{display:grid;grid-template-columns:minmax(0,1.4fr) repeat(2,minmax(0,.6fr));gap:32px}
+@media (max-width:760px){.footer .wrap{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.footer .about{grid-column:1 / -1}}
+.footer .about{display:grid;gap:14px;align-content:start;max-width:28rem}
+.footer .about p{color:var(--muted)}
+.footer h4{margin:0 0 12px;font-family:var(--font-mono);font-size:.74rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:700}
+.footer ul{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.footer ul a{text-decoration:none}
+.footer ul a:hover{text-decoration:underline;text-decoration-color:var(--signal);text-decoration-thickness:2px;text-underline-offset:3px}
+.legal{grid-column:1 / -1;border-top:1px solid var(--rule);padding-top:20px;font-size:.84rem;color:var(--muted);display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px 24px}
+
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}
+  .m-pulse{display:none}
+}
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="logo" href="#top" aria-label="Guessr Group, accueil">
+      <svg viewBox="0 0 34 34" aria-hidden="true">
+        <path d="M4 30 L30 4" style="stroke:var(--signal);stroke-width:7;stroke-linecap:round;fill:none"/>
+        <circle cx="17" cy="17" r="8.5" style="fill:var(--surface);stroke:var(--ink);stroke-width:3.5"/>
+      </svg>
+      <span class="logo-word">Guessr</span>
+      <span class="logo-group">Group</span>
+    </a>
+    <ul class="nav-links">
+      <li><a href="#jeux">Jeux</a></li>
+      <li><a href="#villes">Villes</a></li>
+      <li><a href="#groupe">Le groupe</a></li>
+    </ul>
+    <a class="btn btn-primary" href="https://parisguessr.com" target="_blank" rel="noopener">Jouer</a>
+  </div>
+</header>
+
+<main id="top">
+
+<section class="hero" aria-labelledby="hero-title">
+  <div class="wrap">
+    <div class="hero-copy">
+      <a class="announce" href="#groupe"><b>Nouveau</b> ParisGuessr devient Guessr Group <span aria-hidden="true">→</span></a>
+      <h1 class="headline" id="hero-title">
+        <span class="hl" lang="fr" data-i="0">Devine la <em>station.</em></span>
+        <span class="hl" lang="en" data-i="1" aria-hidden="true">Guess the <em>station.</em></span>
+        <span class="hl" lang="de" data-i="2" aria-hidden="true">Errate die <em>Station.</em></span>
+        <span class="hl" lang="es" data-i="3" aria-hidden="true">Adivina la <em>estación.</em></span>
+        <span class="hl" lang="it" data-i="4" aria-hidden="true">Indovina la <em>stazione.</em></span>
+      </h1>
+      <p class="lead">Les jeux de ParisGuessr partent dans les métros d'Europe. Mêmes règles, vraies lignes, vrais noms de station&nbsp;: Paris aujourd'hui, Londres, Berlin, Madrid et Milan ensuite.</p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="https://parisguessr.com" target="_blank" rel="noopener">Jouer à ParisGuessr <span class="arr" aria-hidden="true">→</span></a>
+        <a class="btn btn-ghost" href="#villes">Voir les 18 villes</a>
+      </div>
+      <dl class="facts">
+        <div><dt>Jeux</dt><dd>7</dd></div>
+        <div><dt>Villes</dt><dd>18</dd></div>
+        <div><dt>Pays</dt><dd>12</dd></div>
+        <div><dt>Lignes de métro</dt><dd>119</dd></div>
+      </dl>
+    </div>
+
+    <div class="trios" id="trios" aria-label="Démo du jeu Trios">
+      <div class="trios-top">
+        <div class="trios-title"><b>Trios</b><span>Essaie dans 5 villes</span></div>
+        <div class="tabs" role="tablist" aria-label="Ville"></div>
+      </div>
+      <div class="plan" role="tabpanel" id="trios-panel">
+        <div class="plan-head">
+          <span class="badge" id="t-badge"></span>
+          <span class="plan-dir" id="t-dir"></span>
+          <span class="plan-brand" id="t-brand"></span>
+        </div>
+        <div class="plan-line" id="t-line">
+          <div class="stop"><span class="dot"></span><span class="name" id="t-before"></span></div>
+          <div class="stop mystery" id="t-mystery"><span class="dot" aria-hidden="true">?</span><span class="name" id="t-answer">? ? ?</span></div>
+          <div class="stop"><span class="dot"></span><span class="name" id="t-after"></span></div>
+        </div>
+      </div>
+      <div class="trios-play">
+        <p class="prompt">Quelle station se trouve entre les deux&nbsp;?</p>
+        <div class="choices" id="t-choices"></div>
+        <p class="feedback" id="t-feedback" aria-live="polite"></p>
+        <div class="trios-foot">
+          <span class="tries" id="t-tries"><span>Essais</span></span>
+          <span class="score">Score <b id="t-score">0/5</b></span>
+          <button class="next" type="button" id="t-next">Ville suivante →</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section groupe" id="groupe" aria-labelledby="groupe-title">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow">Le groupe</span>
+      <h2 class="h2" id="groupe-title">ParisGuessr devient la première station de Guessr Group.</h2>
+      <p class="lead">Chaque ville garde son propre jeu, à son nom&nbsp;: ParisGuessr, LondonGuessr, BerlinGuessr… Guessr Group les relie&nbsp;: une seule équipe, les mêmes sept jeux, et un plan qui s'agrandit ville après ville.</p>
+    </div>
+
+    <ol class="brandline" aria-label="Les marques du groupe">
+      <li class="bl-root"><span class="plate plate-root"><small>Maison mère</small>Guessr Group</span></li>
+      <li><span class="bl-dot" style="--c:var(--l-yellow)"></span><span class="plate">ParisGuessr</span><span class="bl-status live">En ligne</span></li>
+      <li><span class="bl-dot" style="--c:var(--l-red)"></span><span class="plate">LondonGuessr</span><span class="bl-status">Vague 1</span></li>
+      <li><span class="bl-dot" style="--c:var(--l-blue)"></span><span class="plate">BerlinGuessr</span><span class="bl-status">Vague 1</span></li>
+      <li><span class="bl-dot" style="--c:var(--l-purple)"></span><span class="plate">MadridGuessr</span><span class="bl-status">Vague 1</span></li>
+      <li><span class="bl-dot" style="--c:var(--l-green)"></span><span class="plate">MilanoGuessr</span><span class="bl-status">Vague 1</span></li>
+      <li class="bl-more"><span class="bl-dot"></span><strong>+ 13 villes</strong><span class="bl-status">Vagues 2 et 3</span></li>
+    </ol>
+
+    <ul class="principles">
+      <li>
+        <span class="tag">Fidèle au réseau</span>
+        <h3>Le plan officiel, à la lettre</h3>
+        <p>Noms de station, couleurs et ordre des lignes suivent le réseau de chaque ville. À Berlin, on joue avec la U8, pas avec une traduction.</p>
+      </li>
+      <li>
+        <span class="tag">Fr · En · De · Es · It</span>
+        <h3>Dans la langue de la ville</h3>
+        <p>Interface en français, anglais, allemand, espagnol et italien dès la première vague, pour les habitants comme pour les visiteurs.</p>
+      </li>
+      <li>
+        <span class="tag">Mêmes règles partout</span>
+        <h3>Sept jeux dans chaque ville</h3>
+        <p>Un joueur qui connaît Metrodle à Paris sait déjà jouer à Madrid. Seul le réseau change.</p>
+      </li>
+    </ul>
+  </div>
+</section>
+
+<section class="section jeux" id="jeux" aria-labelledby="jeux-title">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow">Les jeux</span>
+      <h2 class="h2" id="jeux-title">Sept façons de connaître son réseau par cœur.</h2>
+      <p class="lead">Les voisins, les correspondances, la géographie, la mémoire&nbsp;: chaque jeu travaille une compétence différente, toujours sur le vrai réseau de la ville.</p>
+    </div>
+
+    <div class="games">
+      <a class="game g-metrodle" href="https://parisguessr.com" target="_blank" rel="noopener">
+        <span class="tag"><b>Quotidien</b> · 8 essais</span>
+        <h3>Metrodle</h3>
+        <p>Une station mystère par jour. Chaque essai t'indique les lignes en commun, les correspondances, la commune et la distance.</p>
+        <div class="md-head" aria-hidden="true"><span>Essai</span><span>Lignes</span><span>Distance</span></div>
+        <ol class="md-board" aria-label="Exemple de partie à Paris, station mystère République">
+          <li><span class="nm">Nation</span><span class="ln"><b class="pb off" style="--b:#FFCD00;--t:#0C1736">1</b><b class="pb off" style="--b:#003CA6;--t:#fff">2</b><b class="pb off" style="--b:#6ECA97;--t:#0C1736">6</b><b class="pb" style="--b:#B6BD00;--t:#0C1736">9</b></span><span class="ds">3,2 km</span></li>
+          <li><span class="nm">Bastille</span><span class="ln"><b class="pb off" style="--b:#FFCD00;--t:#0C1736">1</b><b class="pb" style="--b:#FF7E2E;--t:#0C1736">5</b><b class="pb" style="--b:#E19BDF;--t:#0C1736">8</b></span><span class="ds">1,6 km</span></li>
+          <li><span class="nm">Gare de l'Est</span><span class="ln"><b class="pb off" style="--b:#CF009E;--t:#fff">4</b><b class="pb" style="--b:#FF7E2E;--t:#0C1736">5</b><b class="pb off" style="--b:#FA9ABA;--t:#0C1736">7</b></span><span class="ds">1,1 km</span></li>
+          <li class="win"><span class="nm">République</span><span class="ln"><b class="pb" style="--b:#837902;--t:#fff">3</b><b class="pb" style="--b:#FF7E2E;--t:#0C1736">5</b><b class="pb" style="--b:#E19BDF;--t:#0C1736">8</b><b class="pb" style="--b:#B6BD00;--t:#0C1736">9</b><b class="pb" style="--b:#704B1C;--t:#fff">11</b></span><span class="ds">Trouvé · 4/8</span></li>
+        </ol>
+        <span class="go">Jouer au Metrodle du jour <span class="arr" aria-hidden="true">→</span></span>
+      </a>
+
+      <a class="game" href="https://parisguessr.com/trios" target="_blank" rel="noopener">
+        <svg class="pg" viewBox="0 0 200 72" aria-hidden="true">
+          <line x1="10" y1="36" x2="190" y2="36" style="stroke:var(--l-red);stroke-width:9;stroke-linecap:round"/>
+          <circle cx="40" cy="36" r="10" style="fill:var(--surface);stroke:var(--ink);stroke-width:3.5"/>
+          <circle cx="100" cy="36" r="14" style="fill:var(--signal);stroke:var(--ink);stroke-width:3.5;stroke-dasharray:5 3"/>
+          <text x="100" y="42" text-anchor="middle" style="font:800 16px var(--font-display);fill:var(--signal-ink)">?</text>
+          <circle cx="160" cy="36" r="10" style="fill:var(--surface);stroke:var(--ink);stroke-width:3.5"/>
+        </svg>
+        <h3>Trios</h3>
+        <span class="tag">3 essais · illimité ou chrono</span>
+        <p>Deux stations voisines. Trouve celle qui se cache entre les deux.</p>
+        <span class="go">Jouer <span class="arr" aria-hidden="true">→</span></span>
+      </a>
+
+      <a class="game" href="https://parisguessr.com" target="_blank" rel="noopener">
+        <svg class="pg" viewBox="0 0 200 72" aria-hidden="true">
+          <line x1="100" y1="36" x2="20" y2="36" style="stroke:var(--l-yellow);stroke-width:8;stroke-linecap:round"/>
+          <line x1="100" y1="36" x2="180" y2="36" style="stroke:var(--l-blue);stroke-width:8;stroke-linecap:round"/>
+          <line x1="100" y1="36" x2="100" y2="4" style="stroke:var(--l-green);stroke-width:8;stroke-linecap:round"/>
+          <line x1="100" y1="36" x2="68" y2="68" style="stroke:var(--l-red);stroke-width:8;stroke-linecap:round"/>
+          <line x1="100" y1="36" x2="132" y2="68" style="stroke:var(--l-purple);stroke-width:8;stroke-linecap:round"/>
+          <circle cx="100" cy="36" r="14" style="fill:var(--surface);stroke:var(--ink);stroke-width:4"/>
+        </svg>
+        <h3>Hubs</h3>
+        <span class="tag">Correspondances</span>
+        <p>Cite toutes les lignes ferrées qui desservent une station.</p>
+        <span class="go">Jouer <span class="arr" aria-hidden="true">→</span></span>
+      </a>
+
+      <a class="game" href="https://parisguessr.com" target="_blank" rel="noopener">
+        <svg class="pg" viewBox="0 0 200 72" aria-hidden="true">
+          <circle cx="122" cy="36" r="30" style="fill:none;stroke:var(--rule);stroke-width:2"/>
+          <circle cx="122" cy="36" r="18" style="fill:none;stroke:var(--rule);stroke-width:2"/>
+          <circle cx="122" cy="36" r="7" style="fill:var(--signal);stroke:var(--ink);stroke-width:3"/>
+          <line x1="78" y1="24" x2="114" y2="34" style="stroke:var(--ink);stroke-width:2;stroke-dasharray:4 4"/>
+          <path d="M78 26 c-7 -8 -11 -12 -11 -17 a11 11 0 0 1 22 0 c0 5 -4 9 -11 17z" style="fill:var(--ink)"/>
+          <circle cx="78" cy="9" r="4" style="fill:var(--surface)"/>
+          <text x="22" y="62" style="font:700 12px var(--font-mono);fill:var(--muted)">412 m</text>
+        </svg>
+        <h3>Stations</h3>
+        <span class="tag">Géographie</span>
+        <p>Place la station sur la carte. Plus tu tombes près, plus tu marques.</p>
+        <span class="go">Jouer <span class="arr" aria-hidden="true">→</span></span>
+      </a>
+
+      <a class="game" href="https://parisguessr.com" target="_blank" rel="noopener">
+        <svg class="pg" viewBox="0 0 200 72" aria-hidden="true">
+          <g transform="translate(68 4)">
+            <rect x="0" y="0" width="14" height="14" rx="2" style="fill:var(--l-yellow)"/><rect x="17" y="0" width="14" height="14" rx="2" style="fill:none;stroke:var(--rule);stroke-width:2"/><rect x="34" y="0" width="14" height="14" rx="2" style="fill:var(--l-blue)"/><rect x="51" y="0" width="14" height="14" rx="2" style="fill:none;stroke:var(--rule);stroke-width:2"/>
+            <rect x="0" y="17" width="14" height="14" rx="2" style="fill:none;stroke:var(--rule);stroke-width:2"/><rect x="17" y="17" width="14" height="14" rx="2" style="fill:var(--l-red)"/><rect x="34" y="17" width="14" height="14" rx="2" style="fill:none;stroke:var(--rule);stroke-width:2"/><rect x="51" y="17" width="14" height="14" rx="2" style="fill:var(--l-green)"/>
+            <rect x="0" y="34" width="14" height="14" rx="2" style="fill:var(--l-purple)"/><rect x="17" y="34" width="14" height="14" rx="2" style="fill:none;stroke:var(--rule);stroke-width:2"/><rect x="34" y="34" width="14" height="14" rx="2" style="fill:var(--signal);stroke:var(--ink);stroke-width:2"/><rect x="51" y="34" width="14" height="14" rx="2" style="fill:none;stroke:var(--rule);stroke-width:2"/>
+            <rect x="0" y="51" width="14" height="14" rx="2" style="fill:none;stroke:var(--rule);stroke-width:2"/><rect x="17" y="51" width="14" height="14" rx="2" style="fill:var(--l-blue)"/><rect x="34" y="51" width="14" height="14" rx="2" style="fill:none;stroke:var(--rule);stroke-width:2"/><rect x="51" y="51" width="14" height="14" rx="2" style="fill:var(--l-yellow)"/>
+          </g>
+        </svg>
+        <h3>La Grille</h3>
+        <span class="tag">Puzzle 4×4</span>
+        <p>Remplis la grille avec les stations qui relient deux lignes.</p>
+        <span class="go">Jouer <span class="arr" aria-hidden="true">→</span></span>
+      </a>
+
+      <a class="game" href="https://parisguessr.com" target="_blank" rel="noopener">
+        <svg class="pg" viewBox="0 0 200 72" aria-hidden="true">
+          <path d="M20 56 H70 L102 24" style="fill:none;stroke:var(--l-red);stroke-width:8;stroke-linecap:round;stroke-linejoin:round"/>
+          <path d="M102 24 H180" style="fill:none;stroke:var(--l-blue);stroke-width:8;stroke-linecap:round"/>
+          <circle cx="20" cy="56" r="9" style="fill:var(--surface);stroke:var(--ink);stroke-width:3.5"/>
+          <rect x="90" y="12" width="24" height="24" rx="12" style="fill:var(--surface);stroke:var(--ink);stroke-width:3.5"/>
+          <circle cx="180" cy="24" r="9" style="fill:var(--signal);stroke:var(--ink);stroke-width:3.5"/>
+        </svg>
+        <h3>Connect</h3>
+        <span class="tag">Itinéraire</span>
+        <p>Relie deux stations en construisant ton trajet, correspondance par correspondance.</p>
+        <span class="go">Jouer <span class="arr" aria-hidden="true">→</span></span>
+      </a>
+
+      <a class="game" href="https://parisguessr.com" target="_blank" rel="noopener">
+        <svg class="pg" viewBox="0 0 200 72" aria-hidden="true">
+          <line x1="12" y1="36" x2="188" y2="36" style="stroke:var(--l-green);stroke-width:8;stroke-linecap:round"/>
+          <g style="fill:var(--ink)"><circle cx="24" cy="36" r="6"/><circle cx="46" cy="36" r="6"/><circle cx="68" cy="36" r="6"/><circle cx="90" cy="36" r="6"/><circle cx="112" cy="36" r="6"/></g>
+          <g style="fill:var(--surface);stroke:var(--ink);stroke-width:2.5"><circle cx="134" cy="36" r="5"/><circle cx="156" cy="36" r="5"/><circle cx="178" cy="36" r="5"/></g>
+          <text x="24" y="16" style="font:700 12px var(--font-mono);fill:var(--muted)">5 / 8</text>
+        </svg>
+        <h3>Memory</h3>
+        <span class="tag">Mémoire</span>
+        <p>Récite toutes les stations d'une ou plusieurs lignes, de mémoire.</p>
+        <span class="go">Jouer <span class="arr" aria-hidden="true">→</span></span>
+      </a>
+
+      <a class="game g-explorer" href="https://parisguessr.com" target="_blank" rel="noopener">
+        <svg class="pg" viewBox="0 0 170 72" aria-hidden="true">
+          <path d="M8 60 H52 L92 20 H162" style="fill:none;stroke:var(--l-blue);stroke-width:7;stroke-linecap:round;stroke-linejoin:round"/>
+          <path d="M40 8 L72 40 H162" style="fill:none;stroke:var(--l-yellow);stroke-width:7;stroke-linecap:round;stroke-linejoin:round"/>
+          <path d="M120 64 V8" style="fill:none;stroke:var(--l-green);stroke-width:7;stroke-linecap:round"/>
+          <circle cx="72" cy="40" r="7" style="fill:var(--surface);stroke:var(--ink);stroke-width:3"/>
+          <circle cx="120" cy="20" r="7" style="fill:var(--surface);stroke:var(--ink);stroke-width:3"/>
+          <circle cx="120" cy="40" r="7" style="fill:var(--surface);stroke:var(--ink);stroke-width:3"/>
+        </svg>
+        <div class="txt">
+          <span class="tag">Sans chrono ni score</span>
+          <h3>Explorer</h3>
+          <p>Parcours chaque ligne station par station, pour réviser avant de jouer.</p>
+          <span class="go">Explorer le réseau <span class="arr" aria-hidden="true">→</span></span>
+        </div>
+      </a>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="villes" aria-labelledby="villes-title">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow">Le réseau Guessr</span>
+      <h2 class="h2" id="villes-title">18 villes, 12 pays. Paris est la première station.</h2>
+      <p class="lead">Le plan montre l'ordre de lancement proposé. Choisis une ville pour voir sa fiche.</p>
+    </div>
+
+    <div class="villes-grid">
+      <div class="map-box">
+        <div class="map-scroll" id="map"></div>
+        <div class="map-legend" aria-hidden="true">
+          <span><svg viewBox="0 0 22 22"><circle cx="11" cy="11" r="7" style="fill:var(--signal);stroke:var(--ink);stroke-width:3"/></svg>En ligne</span>
+          <span><svg viewBox="0 0 22 22"><circle cx="11" cy="11" r="6.5" style="fill:var(--surface);stroke:var(--ink);stroke-width:3"/></svg>Vague 1</span>
+          <span><svg viewBox="0 0 22 22"><circle cx="11" cy="11" r="5" style="fill:var(--surface);stroke:var(--ink);stroke-width:3"/></svg>Vague 2</span>
+          <span><svg viewBox="0 0 22 22"><circle cx="11" cy="11" r="4" style="fill:var(--surface);stroke:var(--muted);stroke-width:2.5"/></svg>Vague 3</span>
+        </div>
+        <p class="map-note">Noms des villes en langue locale, comme sur les plans. Les tracés entre villes sont illustratifs.</p>
+      </div>
+
+      <aside class="fiche" id="fiche" aria-live="polite">
+        <span class="kicker" id="f-kicker"></span>
+        <h3 id="f-name"></h3>
+        <p class="exo" id="f-exo"></p>
+        <dl>
+          <div><dt>Jeu</dt><dd id="f-brand"></dd></div>
+          <div><dt>Réseau</dt><dd id="f-lines"></dd></div>
+          <div><dt>Statut</dt><dd id="f-status"></dd></div>
+        </dl>
+        <a class="btn" id="f-cta" href="#"></a>
+      </aside>
+    </div>
+
+    <ol class="waves" id="waves"></ol>
+  </div>
+</section>
+
+<section class="section prevenir" id="prevenir" aria-labelledby="prevenir-title">
+  <div class="wrap">
+    <div class="section-head" style="margin-bottom:0">
+      <span class="eyebrow">Prochaines ouvertures</span>
+      <h2 class="h2" id="prevenir-title">Ta ville n'est pas encore sur le plan&nbsp;?</h2>
+      <p class="lead">Choisis ta ville et laisse ton e-mail&nbsp;: tu seras prévenu le jour où son jeu ouvre.</p>
+    </div>
+    <form class="form" id="wait-form" novalidate>
+      <div class="form-row">
+        <div class="field">
+          <label for="wait-city">Ville</label>
+          <select id="wait-city" name="city"></select>
+        </div>
+        <div class="field">
+          <label for="wait-email">E-mail</label>
+          <input id="wait-email" name="email" type="email" inputmode="email" autocomplete="email" placeholder="prenom@exemple.fr">
+        </div>
+      </div>
+      <button class="btn btn-primary" type="submit">Me prévenir</button>
+      <p class="form-msg" id="wait-msg" aria-live="polite"></p>
+    </form>
+  </div>
+</section>
+
+</main>
+
+<footer class="footer">
+  <div class="wrap">
+    <div class="about">
+      <a class="logo" href="#top" aria-label="Guessr Group, haut de page">
+        <svg viewBox="0 0 34 34" aria-hidden="true">
+          <path d="M4 30 L30 4" style="stroke:var(--signal);stroke-width:7;stroke-linecap:round;fill:none"/>
+          <circle cx="17" cy="17" r="8.5" style="fill:var(--surface);stroke:var(--ink);stroke-width:3.5"/>
+        </svg>
+        <span class="logo-word">Guessr</span>
+        <span class="logo-group">Group</span>
+      </a>
+      <p>Les jeux des transports urbains d'Europe. Né à Paris avec ParisGuessr.</p>
+    </div>
+    <div>
+      <h4>Jouer</h4>
+      <ul>
+        <li><a href="https://parisguessr.com" target="_blank" rel="noopener">ParisGuessr</a></li>
+        <li><a href="https://parisguessr.com/practice" target="_blank" rel="noopener">Entraînement</a></li>
+        <li><a href="https://parisguessr.com/faq" target="_blank" rel="noopener">FAQ</a></li>
+      </ul>
+    </div>
+    <div>
+      <h4>Le groupe</h4>
+      <ul>
+        <li><a href="#jeux">Les jeux</a></li>
+        <li><a href="#villes">Les villes</a></li>
+        <li><a href="#prevenir">Être prévenu</a></li>
+      </ul>
+    </div>
+    <p class="legal">
+      <span>Projet indépendant, sans lien avec les exploitants de transport (RATP, IDFM, TfL, BVG, Metro de Madrid, ATM…). Noms et couleurs de ligne cités à titre informatif.</span>
+      <span>Maquette de proposition · 2026</span>
+    </p>
+  </div>
+</footer>
+
+<script>
+(function(){
+  "use strict";
+  document.documentElement.lang = "fr";
+  var NB = " ";
+
+  /* ---------------- Trios ---------------- */
+  var TRIOS = [
+    {city:"Paris", brand:"ParisGuessr", badge:{k:"circle", t:"1", b:"#FFCD00", f:"#0C1736"}, dir:"Direction Château de Vincennes", color:"#FFCD00",
+     before:"Palais Royal – Musée du Louvre", after:"Châtelet", answer:"Louvre – Rivoli", choices:["Tuileries","Louvre – Rivoli","Les Halles","Pont Neuf"]},
+    {city:"London", brand:"LondonGuessr", badge:{k:"bar", t:"Central", b:"#E32017", f:"#FFFFFF"}, dir:"Eastbound", color:"#E32017",
+     before:"Oxford Circus", after:"Holborn", answer:"Tottenham Court Road", choices:["Bond Street","Covent Garden","Tottenham Court Road","Leicester Square"]},
+    {city:"Berlin", brand:"BerlinGuessr", badge:{k:"rect", t:"U8", b:"#224F86", f:"#FFFFFF"}, dir:"Richtung Hermannstraße", color:"#224F86",
+     before:"Alexanderplatz", after:"Heinrich-Heine-Straße", answer:"Jannowitzbrücke", choices:["Jannowitzbrücke","Moritzplatz","Hackescher Markt","Weinmeisterstraße"]},
+    {city:"Madrid", brand:"MadridGuessr", badge:{k:"circle", t:"1", b:"#2DBEF0", f:"#0C1736"}, dir:"Dirección Valdecarros", color:"#2DBEF0",
+     before:"Gran Vía", after:"Tirso de Molina", answer:"Sol", choices:["Callao","Ópera","Antón Martín","Sol"]},
+    {city:"Milano", brand:"MilanoGuessr", badge:{k:"square", t:"M2", b:"#00A04B", f:"#FFFFFF"}, dir:"Direzione Gessate / Cologno Nord", color:"#00A04B",
+     before:"Lanza", after:"Garibaldi FS", answer:"Moscova", choices:["Cadorna","Moscova","Turati","Monumentale"]}
+  ];
+  var MAX_TRIES = 3;
+  var state = TRIOS.map(function(){ return {left:MAX_TRIES, wrong:[], done:false, won:false}; });
+  var cur = 0;
+
+  var $ = function(id){ return document.getElementById(id); };
+  var tabsEl = document.querySelector("#trios .tabs");
+  var heads = Array.prototype.slice.call(document.querySelectorAll(".headline .hl"));
+
+  TRIOS.forEach(function(t, i){
+    var b = document.createElement("button");
+    b.type = "button"; b.className = "tab"; b.setAttribute("role","tab");
+    b.id = "tab-" + i; b.setAttribute("aria-controls","trios-panel");
+    b.textContent = t.city;
+    b.addEventListener("click", function(){ select(i, false); });
+    b.addEventListener("keydown", function(e){
+      if (e.key === "ArrowRight" || e.key === "ArrowLeft"){
+        e.preventDefault();
+        var n = (i + (e.key === "ArrowRight" ? 1 : -1) + TRIOS.length) % TRIOS.length;
+        select(n, true);
+      }
+    });
+    tabsEl.appendChild(b);
+  });
+
+  function select(i, focusTab){
+    cur = i; render();
+    if (focusTab) $("tab-" + i).focus();
+  }
+
+  function plural(n, w){ return n + NB + w + (n > 1 ? "s" : ""); }
+
+  function render(){
+    var t = TRIOS[cur], s = state[cur];
+    Array.prototype.forEach.call(tabsEl.children, function(b, i){
+      b.setAttribute("aria-selected", i === cur ? "true" : "false");
+      b.tabIndex = i === cur ? 0 : -1;
+      var st = state[i];
+      b.dataset.state = st.done ? (st.won ? "won" : "lost") : "";
+    });
+    $("trios-panel").setAttribute("aria-labelledby", "tab-" + cur);
+    heads.forEach(function(h, i){
+      if (i === cur) h.removeAttribute("aria-hidden"); else h.setAttribute("aria-hidden","true");
+    });
+
+    var badge = $("t-badge");
+    badge.className = "badge " + t.badge.k;
+    badge.style.setProperty("--b", t.badge.b);
+    badge.style.setProperty("--t", t.badge.f);
+    badge.textContent = t.badge.t;
+    $("t-dir").textContent = t.dir;
+    $("t-brand").textContent = t.brand;
+    $("t-line").style.setProperty("--line", t.color);
+    $("t-before").textContent = t.before;
+    $("t-after").textContent = t.after;
+
+    var mys = $("t-mystery");
+    if (s.done){ mys.classList.add("revealed"); $("t-answer").textContent = t.answer; }
+    else { mys.classList.remove("revealed"); $("t-answer").textContent = "? ? ?"; }
+
+    var box = $("t-choices");
+    box.innerHTML = "";
+    t.choices.forEach(function(c){
+      var b = document.createElement("button");
+      b.type = "button"; b.className = "choice"; b.textContent = c;
+      if (s.wrong.indexOf(c) > -1){ b.classList.add("wrong"); b.disabled = true; }
+      if (s.done){ b.disabled = true; if (c === t.answer) b.classList.add("right"); }
+      b.addEventListener("click", function(){ guess(c, b); });
+      box.appendChild(b);
+    });
+
+    var tries = $("t-tries");
+    tries.innerHTML = "<span>Essais</span>";
+    for (var k = 0; k < MAX_TRIES; k++){
+      var d = document.createElement("i");
+      if (k >= s.left) d.className = "used";
+      tries.appendChild(d);
+    }
+    tries.setAttribute("aria-label", plural(s.left, "essai") + " restant" + (s.left > 1 ? "s" : ""));
+
+    var won = state.filter(function(x){ return x.won; }).length;
+    $("t-score").textContent = won + "/" + TRIOS.length;
+
+    var fb = $("t-feedback");
+    fb.className = "feedback";
+    if (!s.done && s.wrong.length === 0){
+      fb.textContent = t.city + " · " + t.before + " → ? → " + t.after;
+    }
+  }
+
+  function guess(c, btn){
+    var t = TRIOS[cur], s = state[cur], fb = $("t-feedback");
+    if (s.done) return;
+    if (c === t.answer){
+      s.done = true; s.won = true;
+      var used = MAX_TRIES - s.left + 1;
+      render();
+      fb.className = "feedback good";
+      fb.textContent = "Bravo" + NB + "! " + t.answer + ", trouvé en " + plural(used, "essai") + ".";
+    } else {
+      s.wrong.push(c); s.left--;
+      if (s.left === 0){
+        s.done = true;
+        render();
+        fb.className = "feedback bad";
+        fb.textContent = "Raté" + NB + ": c'était " + t.answer + ".";
+      } else {
+        render();
+        fb.className = "feedback bad";
+        fb.textContent = "Non, pas " + c + ". Encore " + plural(s.left, "essai") + ".";
+        var again = Array.prototype.find.call($("t-choices").children, function(b){ return b.textContent === c; });
+        if (again){ again.classList.add("shake"); }
+      }
+    }
+    var all = state.every(function(x){ return x.done; });
+    if (all){
+      var won = state.filter(function(x){ return x.won; }).length;
+      fb.textContent += " Partie terminée" + NB + ": " + won + "/" + TRIOS.length + " villes.";
+    }
+  }
+
+  $("t-next").addEventListener("click", function(){
+    for (var k = 1; k <= TRIOS.length; k++){
+      var n = (cur + k) % TRIOS.length;
+      if (!state[n].done || k === TRIOS.length){ select(n, false); return; }
+    }
+  });
+
+  render();
+
+  /* ---------------- Carte ---------------- */
+  var WAVES = [
+    {label:"En ligne", text:"Le réseau d'origine, avec métro, RER, tram, bus et Transilien."},
+    {label:"Vague 1", text:"Une ville par grande langue d'Europe : anglais, allemand, espagnol, italien."},
+    {label:"Vague 2", text:"Les grands réseaux denses et très visités."},
+    {label:"Vague 3", text:"Les autres métropoles équipées d'un métro."}
+  ];
+  var CITIES = [
+    {id:"paris", name:"Paris", fr:"", cc:"FR", country:"France", brand:"ParisGuessr", lines:16, extra:"+ 5 RER", wave:0, x:260, y:280, lx:-20, ly:6, a:"end"},
+    {id:"london", name:"London", fr:"Londres", cc:"GB", country:"Royaume-Uni", brand:"LondonGuessr", lines:11, wave:1, x:160, y:220, lx:-16, ly:5, a:"end"},
+    {id:"berlin", name:"Berlin", fr:"", cc:"DE", country:"Allemagne", brand:"BerlinGuessr", lines:9, wave:1, x:560, y:180, lx:16, ly:5, a:"start"},
+    {id:"madrid", name:"Madrid", fr:"", cc:"ES", country:"Espagne", brand:"MadridGuessr", lines:13, wave:1, x:120, y:480, lx:0, ly:-17, a:"middle"},
+    {id:"milano", name:"Milano", fr:"Milan", cc:"IT", country:"Italie", brand:"MilanoGuessr", lines:5, wave:1, x:420, y:380, lx:16, ly:5, a:"start"},
+    {id:"barcelona", name:"Barcelona", fr:"Barcelone", cc:"ES", country:"Espagne", brand:"BarcelonaGuessr", lines:12, wave:2, x:220, y:480, lx:0, ly:28, a:"middle"},
+    {id:"lyon", name:"Lyon", fr:"", cc:"FR", country:"France", brand:"LyonGuessr", lines:4, wave:2, x:300, y:360, lx:-15, ly:5, a:"end"},
+    {id:"bruxelles", name:"Bruxelles", fr:"", frLabel:"Brussel en néerlandais", cc:"BE", country:"Belgique", brand:"BruxellesGuessr", lines:4, wave:2, x:340, y:220, lx:15, ly:5, a:"start"},
+    {id:"amsterdam", name:"Amsterdam", fr:"", cc:"NL", country:"Pays-Bas", brand:"AmsterdamGuessr", lines:5, wave:2, x:360, y:160, lx:0, ly:-15, a:"middle"},
+    {id:"lisboa", name:"Lisboa", fr:"Lisbonne", cc:"PT", country:"Portugal", brand:"LisboaGuessr", lines:4, wave:2, x:40, y:520, lx:0, ly:27, a:"middle"},
+    {id:"wien", name:"Wien", fr:"Vienne", cc:"AT", country:"Autriche", brand:"WienGuessr", lines:5, wave:2, x:620, y:340, lx:15, ly:5, a:"start"},
+    {id:"muenchen", name:"München", fr:"Munich", cc:"DE", country:"Allemagne", brand:"MünchenGuessr", lines:8, wave:2, x:460, y:320, lx:-6, ly:27, a:"end"},
+    {id:"marseille", name:"Marseille", fr:"", cc:"FR", country:"France", brand:"MarseilleGuessr", lines:2, wave:3, x:320, y:440, lx:14, ly:5, a:"start"},
+    {id:"hamburg", name:"Hamburg", fr:"Hambourg", cc:"DE", country:"Allemagne", brand:"HamburgGuessr", lines:4, wave:3, x:460, y:140, lx:0, ly:-14, a:"middle"},
+    {id:"roma", name:"Roma", fr:"Rome", cc:"IT", country:"Italie", brand:"RomaGuessr", lines:3, wave:3, x:500, y:460, lx:14, ly:5, a:"start"},
+    {id:"praha", name:"Praha", fr:"Prague", cc:"CZ", country:"Tchéquie", brand:"PrahaGuessr", lines:3, wave:3, x:580, y:260, lx:14, ly:5, a:"start"},
+    {id:"kobenhavn", name:"København", fr:"Copenhague", cc:"DK", country:"Danemark", brand:"KøbenhavnGuessr", lines:4, wave:3, x:540, y:100, lx:0, ly:-14, a:"middle"},
+    {id:"stockholm", name:"Stockholm", fr:"", cc:"SE", country:"Suède", brand:"StockholmGuessr", lines:7, wave:3, x:640, y:40, lx:0, ly:-14, a:"middle"}
+  ];
+  var LINES = [
+    {c:"--l-yellow", p:[[260,280],[320,220],[340,220],[340,180],[360,160],[440,160],[460,140],[500,140],[540,100],[580,100],[640,40]]},
+    {c:"--l-red",    p:[[160,220],[200,220],[300,320],[300,420],[320,440],[280,480],[80,480],[40,520]]},
+    {c:"--l-blue",   p:[[260,280],[420,280],[460,320],[480,340],[620,340]]},
+    {c:"--l-purple", p:[[460,140],[500,180],[560,180],[560,240],[580,260],[580,300],[620,340]]},
+    {c:"--l-green",  p:[[300,360],[400,360],[420,380],[500,460]]}
+  ];
+  var R = [12, 9, 7.5, 6];
+  var NS = "http://www.w3.org/2000/svg";
+  function el(tag, attrs){
+    var e = document.createElementNS(NS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+  var svg = el("svg", {viewBox:"0 0 720 560", role:"group", "aria-label":"Plan schématique des villes Guessr en Europe"});
+  var defs = el("defs", {});
+  var pat = el("pattern", {id:"mgrid", width:"20", height:"20", patternUnits:"userSpaceOnUse"});
+  pat.appendChild(el("circle", {cx:"10", cy:"10", r:"1.1", "class":"m-grid"}));
+  defs.appendChild(pat); svg.appendChild(defs);
+  svg.appendChild(el("rect", {x:"0", y:"0", width:"720", height:"560", fill:"url(#mgrid)"}));
+
+  LINES.forEach(function(l){
+    var d = l.p.map(function(pt, i){ return (i ? "L" : "M") + pt[0] + " " + pt[1]; }).join(" ");
+    svg.appendChild(el("path", {d:d, "class":"m-line", style:"stroke:var(" + l.c + ")"}));
+  });
+
+  var nodes = {};
+  CITIES.forEach(function(c){
+    var g = el("g", {"class":"m-st w" + c.wave, tabindex:"0", role:"button",
+      "aria-label": c.name + ", " + c.country + ", " + WAVES[c.wave].label});
+    var r = R[c.wave];
+    if (c.wave === 0) g.appendChild(el("circle", {cx:c.x, cy:c.y, r:r, "class":"m-pulse"}));
+    g.appendChild(el("circle", {cx:c.x, cy:c.y, r:r + 7, "class":"halo"}));
+    g.appendChild(el("circle", {cx:c.x, cy:c.y, r:r, "class":"mk"}));
+    var tx = el("text", {x:c.x + c.lx, y:c.y + c.ly, "text-anchor":c.a});
+    tx.textContent = c.name;
+    g.appendChild(tx);
+    g.addEventListener("click", function(){ pick(c.id); });
+    g.addEventListener("keydown", function(e){ if (e.key === "Enter" || e.key === " "){ e.preventDefault(); pick(c.id); } });
+    svg.appendChild(g);
+    nodes[c.id] = g;
+  });
+  $("map").appendChild(svg);
+
+  /* Lignes de vagues */
+  var wavesEl = $("waves");
+  var chips = {};
+  WAVES.forEach(function(w, wi){
+    var li = document.createElement("li");
+    li.className = "wave w" + wi;
+    var list = CITIES.filter(function(c){ return c.wave === wi; });
+    li.innerHTML = '<span class="wdot" aria-hidden="true"></span><h3>' + w.label + '</h3><p>' + w.text.replace(" :", NB + ":") + '</p>';
+    var ul = document.createElement("ul");
+    list.forEach(function(c){
+      var b = document.createElement("button");
+      b.type = "button"; b.className = "city-chip"; b.setAttribute("aria-pressed","false");
+      b.innerHTML = '<small>' + c.cc + '</small>' + c.name;
+      b.addEventListener("click", function(){ pick(c.id); });
+      var item = document.createElement("li"); item.appendChild(b); ul.appendChild(item);
+      chips[c.id] = b;
+    });
+    li.appendChild(ul);
+    wavesEl.appendChild(li);
+  });
+
+  var selected = null;
+  function pick(id){
+    var c = CITIES.filter(function(x){ return x.id === id; })[0];
+    if (!c) return;
+    if (selected){ nodes[selected].classList.remove("sel"); chips[selected].setAttribute("aria-pressed","false"); }
+    selected = id;
+    nodes[id].classList.add("sel");
+    chips[id].setAttribute("aria-pressed","true");
+    /* la station choisie passe au premier plan */
+    nodes[id].parentNode.appendChild(nodes[id]);
+
+    $("f-kicker").textContent = c.cc + " · " + c.country;
+    $("f-name").textContent = c.name;
+    $("f-exo").textContent = c.frLabel ? c.frLabel : (c.fr ? c.fr + " en français" : "");
+    $("f-brand").textContent = c.brand;
+    $("f-lines").textContent = c.lines + NB + "lignes de métro" + (c.extra ? " " + c.extra : "");
+    var st = $("f-status");
+    st.innerHTML = "";
+    var chip = document.createElement("span");
+    chip.className = "chip" + (c.wave === 0 ? " live" : "");
+    chip.textContent = WAVES[c.wave].label;
+    st.appendChild(chip);
+    var cta = $("f-cta");
+    if (c.wave === 0){
+      cta.className = "btn btn-primary";
+      cta.href = "https://parisguessr.com"; cta.target = "_blank"; cta.rel = "noopener";
+      cta.textContent = "Jouer à " + c.brand + " →";
+    } else {
+      cta.className = "btn btn-ghost";
+      cta.href = "#prevenir"; cta.removeAttribute("target"); cta.removeAttribute("rel");
+      cta.textContent = "Être prévenu pour " + (c.fr || c.name);
+      cta.onclick = function(){ $("wait-city").value = c.id; };
+    }
+    if (c.wave === 0) cta.onclick = null;
+  }
+  pick("paris");
+
+  /* ---------------- Être prévenu ---------------- */
+  var sel = $("wait-city");
+  WAVES.forEach(function(w, wi){
+    if (wi === 0) return;
+    var og = document.createElement("optgroup");
+    og.label = w.label;
+    CITIES.filter(function(c){ return c.wave === wi; }).forEach(function(c){
+      var o = document.createElement("option");
+      o.value = c.id; o.textContent = c.name + (c.fr && !c.frLabel ? " (" + c.fr + ")" : "");
+      og.appendChild(o);
+    });
+    sel.appendChild(og);
+  });
+  sel.value = "london";
+
+  $("wait-form").addEventListener("submit", function(e){
+    e.preventDefault();
+    var email = $("wait-email").value.trim();
+    var msg = $("wait-msg");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){
+      msg.className = "form-msg bad";
+      msg.textContent = "Cette adresse ne semble pas valide. Vérifie le @ et le domaine, par exemple prenom@exemple.fr.";
+      $("wait-email").focus();
+      return;
+    }
+    var c = CITIES.filter(function(x){ return x.id === sel.value; })[0];
+    msg.className = "form-msg good";
+    msg.textContent = "Maquette" + NB + ": le formulaire n'est pas encore branché. En production, " + email + " serait inscrit pour " + (c.fr || c.name) + ".";
+  });
+})();
+</script>
+</body>
+</html>
