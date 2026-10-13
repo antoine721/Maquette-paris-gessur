@@ -1,15 +1,21 @@
-# Guessr Group — maquette de landing page
+# Guessr Group — maquette de landing page (V2)
 
-Proposition de refonte de [parisguessr.com](https://parisguessr.com) : ParisGuessr devient **Guessr Group**, une famille de jeux de transports urbains déclinée dans plusieurs pays d'Europe.
+Proposition de refonte de [parisguessr.com](https://parisguessr.com) : ParisGuessr devient **Guessr Group**, une famille de jeux de métro déclinée dans 18 villes de 12 pays européens.
 
-Ouvrir `index.html` dans un navigateur (fichier autonome, aucune dépendance hormis Google Fonts).
+Ouvrir `index.html` dans un navigateur (fichier autonome, seule dépendance externe : Google Fonts).
 
-## Contenu de la page
+## Direction artistique
 
-- **Hero jouable** : une démo de *Trios* dans 5 villes (Paris, London, Berlin, Madrid, Milano). Le titre change de langue avec la ville choisie.
-- **Le groupe** : architecture de marque, Guessr Group en maison mère et un jeu par ville (ParisGuessr, LondonGuessr, BerlinGuessr…).
-- **Les jeux** : Metrodle, Trios, Hubs, Stations, La Grille, Connect, Memory et Explorer.
-- **Le réseau Guessr** : plan schématique de l'Europe façon plan de métro, 18 villes dans 12 pays, ordre de lancement proposé en 3 vagues, fiche par ville.
-- **Être prévenu** : formulaire de liste d'attente par ville (non branché dans la maquette).
+Le métro la nuit : un seul univers sombre, des lignes lumineuses aux vraies couleurs des réseaux, une typo display à caractère (Funnel Display) et un texte sobre (Geist).
 
-Thème clair et sombre automatiques, responsive jusqu'à 360 px.
+## Sections
+
+- **Hero animé** : un plan vivant de l'Europe. Chaque ville s'allume avec son réseau dans les couleurs officielles de ses lignes, des rames circulent, des impulsions partent de Paris. Le titre change de langue (FR, EN, DE, ES, IT).
+- **Bandeau** : 18 vraies stations, une par ville, avec la couleur de leur ligne.
+- **Démo jouable de Trios** dans 5 villes (Paris ligne 1, London Central, Berlin U8, Madrid línea 1, Milano M2), avec score et états par ville.
+- **Affiches de villes** : un jeu par ville (ParisGuessr, LondonGuessr…), affiche générée à partir des couleurs de ligne.
+- **Les 7 jeux** en grille, chacun avec un aperçu de son interface (exemples réels du réseau parisien).
+- **Plan de lancement** : En ligne, Vague 1, Vague 2, Vague 3.
+- **Liste d'attente** par ville (formulaire non branché dans la maquette).
+
+Responsive jusqu'à 360 px, `prefers-reduced-motion` respecté, animations en pause hors écran.
